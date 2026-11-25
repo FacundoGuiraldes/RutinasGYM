@@ -262,3 +262,87 @@ a.button:focus-visible{outline:3px solid currentColor;outline-offset:2px}
 /* Opciones con texto (zonas, género): letra normal, no el número grande */
 .choices.cols.words{grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}
 .choices.cols.words button.choice b{font-family:inherit;font-weight:700;font-size:1rem;line-height:1.2}
+
+/* ======================================================================
+   Versión celular: pensada para usarse parado, con una mano y entre series
+   ====================================================================== */
+html { -webkit-tap-highlight-color: transparent; }
+body { overscroll-behavior-y: none; font-variant-numeric: tabular-nums; }
+main { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+button, input, select, textarea { touch-action: manipulation; }
+input, select, textarea { font-size: 16px; } /* evita el zoom automático de iPhone */
+button { border-radius: 12px; }
+button:active:not(:disabled) { transition-duration: 0s; }
+
+/* Días como pestañas fijas arriba: un toque y cambiás de día */
+.daytabs { position: sticky; top: 0; z-index: 15; display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none;
+  margin: 8px -16px 0; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4); border-bottom: 1px solid var(--line); }
+.daytabs::-webkit-scrollbar { display: none; }
+button.daytab { flex: none; scroll-snap-align: center; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 16px 0 8px; border: 1.5px solid var(--line); background: var(--surface); box-shadow: none; border-radius: 99px; font-weight: 600; color: var(--muted); max-width: 70vw; }
+button.daytab b { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--sunk); color: var(--ink); font-family: var(--display); font-weight: 900; font-size: 1.25rem; line-height: 1; transition: background-color .2s, color .2s; }
+button.daytab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.daytab[aria-current=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+button.daytab[aria-current=true] b { background: var(--bg); color: var(--ink); }
+button.daytab.is-part b { background: color-mix(in srgb, var(--p3) 70%, var(--sunk)); }
+button.daytab.is-done b { background: var(--ok); color: #fff; }
+button.daytab:hover:not(:disabled), button.daytab:active:not(:disabled) { transform: none; box-shadow: none; }
+button.daytab:active:not(:disabled) { transform: scale(.96); }
+
+/* Día seleccionado */
+.dayhead { display: flex; align-items: center; gap: 14px; padding: 18px 4px 6px; }
+.dayhead h2 { margin: 0; font-size: 2.2rem; }
+.ring { position: relative; width: 56px; height: 56px; flex: none; }
+.ring svg { display: block; }
+.ring circle { fill: none; stroke-width: 6; }
+.ring-bg { stroke: var(--sunk); }
+.ring-fg { stroke: var(--c, var(--accent)); stroke-linecap: round; transition: stroke-dasharray .45s cubic-bezier(.2, .9, .25, 1); }
+.ring b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-weight: 800; font-size: 1.05rem; }
+.daycard { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; }
+
+/* Cada ejercicio es una tarjeta */
+.ex { grid-template-columns: 84px 1fr 48px; gap: 14px; margin: 12px 0; padding: 14px; border: 1px solid var(--line); border-top: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); transition: opacity .2s, background-color .2s, transform .15s; animation: rise .35s ease both; }
+.ex:nth-of-type(2) { animation-delay: .02s; } .ex:nth-of-type(3) { animation-delay: .05s; } .ex:nth-of-type(4) { animation-delay: .08s; } .ex:nth-of-type(5) { animation-delay: .11s; }
+.ex-thumb { width: 84px; height: 84px; border-radius: 14px; }
+.ex.done { background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+.ex-name { font-size: 1.02rem; }
+.ex-dose b { font-size: 2.1rem; }
+.ex-actions button.small { min-height: 40px; border-radius: 99px; padding: 0 16px; }
+input.check { width: 48px; height: 48px; border-width: 2.5px; }
+input.check::after { left: 15px; top: 8px; }
+input.check:active { transform: scale(.9); }
+
+/* Botón principal pegado abajo, al alcance del pulgar */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: linear-gradient(to top, var(--bg) 62%, transparent); pointer-events: none; display: flex; justify-content: center; }
+.dock button { pointer-events: auto; width: 100%; max-width: 688px; min-height: 56px; font-size: 1.05rem; border-radius: 16px; }
+.dock button.primary.ready { animation: pop .5s ease; background: var(--ok); color: #fff; }
+
+/* Cronómetro de descanso: flota sobre el botón */
+.resttimer { position: fixed; left: 12px; right: 12px; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 30; max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 10px; padding: 12px 14px 14px; border-radius: 18px; background: var(--ink); color: var(--bg); box-shadow: 0 14px 34px -10px rgb(0 0 0 / .5); overflow: hidden; animation: rise .25s cubic-bezier(.2, .9, .25, 1) both; }
+.resttimer .muted { color: color-mix(in srgb, var(--bg) 65%, transparent); }
+.resttimer b { display: block; font-family: var(--display); font-weight: 900; font-size: 2.6rem; line-height: .9; }
+.resttimer .rt-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.resttimer button { background: transparent; color: var(--bg); border-color: color-mix(in srgb, var(--bg) 40%, transparent); box-shadow: none; }
+.resttimer button:last-of-type { background: var(--bg); color: var(--ink); }
+.rt-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: color-mix(in srgb, var(--bg) 20%, transparent); }
+.rt-bar i { display: block; height: 100%; background: var(--p3); transform-origin: left; transition: transform .25s linear; }
+.toast { bottom: calc(150px + env(safe-area-inset-bottom)); border-radius: 14px; }
+
+/* Diálogos como hojas que suben desde abajo */
+dialog.sheet { margin: auto auto 0; width: 100%; max-width: 560px; max-height: 88dvh; border-radius: 24px 24px 0 0; border: 0; border-top: 1.5px solid var(--line); padding: 8px 18px calc(20px + env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+dialog.sheet[open] { animation: sheet-up .3s cubic-bezier(.2, .9, .25, 1) both; }
+dialog.sheet .grab { width: 44px; height: 5px; border-radius: 3px; background: var(--line); margin: 4px auto 14px; }
+dialog.sheet button[data-close] { min-height: 40px; }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@media (min-width: 760px) { dialog.sheet { margin: auto; border-radius: 20px; border: 1.5px solid var(--ink); } .dayhead h2 { font-size: 2.6rem; } }
+
+/* Cabecera más compacta */
+.week { padding-top: 0; }
+.week-count { font-size: clamp(4rem, 20vw, 6rem); }
+
+.week .bar-art { max-height: 64px; margin-top: 2px; }
+.week h1 { font-size: clamp(2rem, 8vw, 2.8rem); }
+.week-top { margin-top: 8px !important; align-items: center; }
+.week-count { font-size: clamp(3.4rem, 16vw, 4.8rem); }
+.month { margin-top: 10px; }
+p.tip { margin: 16px 4px 0; }

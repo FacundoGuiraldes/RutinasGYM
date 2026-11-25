@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#121719">
+  <meta name="theme-color" content="#121719" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#eceeea" media="(prefers-color-scheme: light)">
   <meta name="robots" content="noindex">
   <meta name="referrer" content="no-referrer">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -29,7 +30,8 @@
   </main>
 
   <!-- Cómo se hace el ejercicio -->
-  <dialog id="howDialog">
+  <dialog id="howDialog" class="sheet">
+    <div class="grab" aria-hidden="true"></div>
     <div class="row spread"><h3 id="howTitle"></h3><button class="small ghost" data-close>Cerrar</button></div>
     <div class="sk gif" id="howSk"></div>
     <img id="howGif" class="gif hidden" alt="">
@@ -38,7 +40,8 @@
   </dialog>
 
   <!-- Pedir otro ejercicio -->
-  <dialog id="swapDialog">
+  <dialog id="swapDialog" class="sheet">
+    <div class="grab" aria-hidden="true"></div>
     <h3>Cambiar ejercicio</h3>
     <p class="muted" id="swapCurrent"></p>
     <label for="swapReason">¿Por qué querés cambiarlo? (opcional)</label>

@@ -42,6 +42,8 @@
   let state = null; // última vista que devolvió el servidor
   let lastWeekDone = null; // para animar el disco nuevo cuando completás un día
   let lastToggled = null; // para animar el tilde que acabás de tocar
+  let selDay = null; // índice del día que se está viendo
+  let rest = null; // temporizador de descanso { end, total, timer }
 
   // ---------- Utilidades ----------
 
@@ -266,32 +268,77 @@
         h("p", { class: "week-label", text: done >= planned ? "Semana completa" : "días esta semana" })),
       barbell({ planned, done, newIndex }),
       h("div", { class: "month" }, h("div", { class: "row spread small" }, h("span", { text: "Este mes" }), h("b", { text: `${progress.cycle.done} de ${progress.cycle.planned} días` })), monthSegments),
-      h("p", { class: "muted small", style: "margin-top:14px", text: "Tildá cada ejercicio al terminarlo y cerrá el día con “Día completo”. Con eso tu rutina del mes que viene se ajusta a cómo venís." })
     );
 
-    const days = routine.days.map((d, i) => {
-      const doneCount = d.exercises.filter((e) => e.done).length;
-      const det = h("details", { class: "day" + (d.completedToday ? " is-done" : ""), open: i === openIdx });
-      det.append(
-        h("summary", {},
-          h("span", { class: "num", "aria-hidden": "true", text: String(i + 1) }),
-          h("div", { class: "grow" }, h("h3", { text: d.label.replace(/^D[ií]a\s*\d+\s*[—–-]\s*/i, "") }), h("span", { class: "muted small", text: `${d.exercises.length} ejercicios${d.estMinutes ? `, unos ${d.estMinutes} min` : ""}, ${doneCount} tildados` })),
-          d.completedToday ? h("span", { class: "pill ok", text: "Completo hoy" }) : null,
-          h("span", { class: "chev", "aria-hidden": "true" })
-        ),
-        h("div", { class: "body" },
-          ...d.exercises.map((e) => exerciseRow(d, e)),
-          h("div", { style: "margin-top:14px" },
-            d.completedToday
-              ? h("button", { class: "ghost full", type: "button", text: "Desmarcar día completo", onclick: (ev) => completeDay(d, false, ev.currentTarget) })
-              : h("button", { class: "primary full", type: "button", text: "Día completo", onclick: (ev) => completeDay(d, true, ev.currentTarget) })
-          ))
-      );
-      return det;
-    });
+    if (selDay === null || selDay >= routine.days.length) selDay = openIdx;
+    const d = routine.days[selDay];
+    const dayTabs = h("nav", { class: "daytabs", "aria-label": "Días de la rutina" },
+      ...routine.days.map((x, i) => {
+        const n = x.exercises.filter((e) => e.done).length;
+        return h("button", { class: "daytab" + (x.completedToday ? " is-done" : "") + (n && !x.completedToday ? " is-part" : ""), type: "button", "aria-current": i === selDay ? "true" : null,
+          onclick: () => { selDay = i; swapView(); window.scrollTo({ top: 0 }); } },
+          h("b", { text: String(i + 1) }), h("span", { text: x.label.replace(/^D[ií]a\s*\d+\s*[—–-]\s*/i, "") }));
+      }));
+
+    const doneCount = d.exercises.filter((e) => e.done).length;
+    const total = d.exercises.length;
+    const dayHead = h("div", { class: "dayhead" },
+      h("div", { class: "grow" },
+        h("h2", { text: d.label.replace(/^D[ií]a\s*\d+\s*[—–-]\s*/i, "") }),
+        h("span", { class: "muted small", text: `${total} ejercicios${d.estMinutes ? `, unos ${d.estMinutes} min` : ""}` })),
+      ring(doneCount, total));
+
+    const dayCard = h("section", { class: "daycard", style: `--c: ${PLATE_COLORS[selDay % 6]}` },
+      dayHead,
+      ...d.exercises.map((e) => exerciseRow(d, e)));
+
+    const cta = d.completedToday
+      ? h("button", { class: "ghost", type: "button", text: "Desmarcar día completo", onclick: (ev) => completeDay(d, false, ev.currentTarget) })
+      : h("button", { class: "primary" + (doneCount === total && total ? " ready" : ""), type: "button", text: doneCount === total && total ? "Terminar el día" : `Día completo (${doneCount}/${total})`, onclick: (ev) => completeDay(d, true, ev.currentTarget) });
+    const dock = h("div", { class: "dock" }, cta);
 
     $app.removeAttribute("aria-busy");
-    $app.replaceChildren(header, deloadBanner, ...days, limitationsCard(view), h("footer", { class: "attr", text: view.attribution }));
+    $app.replaceChildren(...[header, deloadBanner, dayTabs, dayCard, limitationsCard(view), h("p", { class: "muted small tip", text: "Tildá cada ejercicio al terminarlo y cerrá el día con el botón de abajo: así tu rutina del mes que viene se ajusta a cómo venís." }), h("footer", { class: "attr", text: view.attribution }), dock].filter(Boolean));
+    dayTabs.querySelector("[aria-current]")?.scrollIntoView({ inline: "center", block: "nearest" });
+  }
+
+  // Anillo de progreso del día
+  function ring(done, total) {
+    const R = 22, C = 2 * Math.PI * R, f = total ? done / total : 0;
+    return h("div", { class: "ring", role: "img", "aria-label": `${done} de ${total} ejercicios` },
+      svg("svg", { viewBox: "0 0 56 56", width: "56", height: "56" },
+        svg("circle", { cx: 28, cy: 28, r: R, class: "ring-bg" }),
+        svg("circle", { cx: 28, cy: 28, r: R, class: "ring-fg", "stroke-dasharray": `${C * f} ${C}`, transform: "rotate(-90 28 28)" })),
+      h("b", { text: `${done}/${total}` }));
+  }
+
+  // Cambio de día con transición suave (si el navegador la soporta)
+  function swapView() {
+    if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(render);
+    else render();
+  }
+
+  // ---------- Descanso entre series ----------
+  // Al tildar un ejercicio aparece un cronómetro con el descanso recomendado.
+  function buzz(p) { try { navigator.vibrate?.(p); } catch { /* sin vibración */ } }
+  function stopRest() { if (rest) { clearInterval(rest.timer); rest = null; } document.querySelector(".resttimer")?.remove(); }
+  function startRest(sec, name) {
+    stopRest();
+    const fmt = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+    const time = h("b", { text: fmt(sec) });
+    const bar = h("i", {});
+    const box = h("div", { class: "resttimer", role: "timer", "aria-live": "off" },
+      h("div", { class: "grow" }, h("span", { class: "small muted", text: "Descanso" }), time, h("span", { class: "rt-name small muted", text: name })),
+      h("button", { class: "small ghost", type: "button", text: "+15 s", onclick: () => { rest.end += 15000; rest.total += 15; } }),
+      h("button", { class: "small", type: "button", text: "Listo", onclick: stopRest }),
+      h("div", { class: "rt-bar" }, bar));
+    document.body.append(box);
+    rest = { end: Date.now() + sec * 1000, total: sec, timer: setInterval(() => {
+      const left = Math.max(0, Math.round((rest.end - Date.now()) / 1000));
+      time.textContent = fmt(left);
+      bar.style.transform = `scaleX(${left / rest.total})`;
+      if (left <= 0) { buzz([200, 100, 200]); toast("Se terminó el descanso"); stopRest(); }
+    }, 250) };
   }
 
   // "¿Te duele algo?": el socio lo cuenta con sus palabras y la rutina se ajusta sola
@@ -345,6 +392,7 @@
       const r = await api("POST", `/api/me/days/${day.id}/exercises/${e.id}/toggle`);
       e.done = r.done;
       lastToggled = r.done ? e.id : null;
+      if (r.done) { buzz(18); if (e.restSec) startRest(e.restSec, cap(e.exercise.name)); } else stopRest();
       keepOpenAndRender();
     } catch (err) {
       box.checked = e.done;
@@ -359,19 +407,17 @@
     try {
       state = await api(complete ? "POST" : "DELETE", `/api/me/days/${day.id}/complete`);
       keepOpenAndRender();
-      if (complete) toast("¡Día completo! Buen laburo.");
+      if (complete) { stopRest(); buzz([30, 60, 30]); toast("¡Día completo! Buen laburo."); }
     } catch (err) {
       setLoading(btn, false);
       toast(err.message, true);
     }
   }
 
-  // Re-dibuja conservando qué días estaban abiertos y el scroll
+  // Re-dibuja conservando el scroll
   function keepOpenAndRender() {
-    const open = [...document.querySelectorAll("details")].map((d) => d.open);
     const y = window.scrollY;
     render();
-    document.querySelectorAll("details").forEach((d, i) => { d.open = open[i] ?? d.open; });
     window.scrollTo(0, y);
     lastToggled = null;
   }
