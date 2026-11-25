@@ -261,7 +261,10 @@ const lengthenedBoost = (e, focus) => (focus === "hipertrofia" && LENGTHENED.tes
 
 // Candidatos para un slot, relajando criterios de a poco si no hay ninguno:
 // 1) rol + patrón exactos, 2) solo rol, 3) cualquier ejercicio usable del músculo.
-function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng, focus, minQ = 0, dayFamilies = new Set() }) {
+const DUP_FAMILIES = new Set(["pushdown", "lateral", "flatpress", "inclinepress", "vpull"]);
+function pickForSlot(pool, slot, ctx0) {
+  const { effLevel, dayUsed, routineUsed, prevIds, rng, focus, minQ = 0, dayFamilies = new Set() } = ctx0;
+  const ctx = ctx0;
   let base = pool.filter((e) => USABLE_ROLES.has(e.role) && e.level <= effLevel && slot.targets.includes(e.target) && (minQ <= 0 || qualityWeight(e, focus) >= minQ));
   // Algunos huecos piden un ejercicio concreto (ej.: elevaciones LATERALES para el deltoides medio, no frontales)
   if (slot.nameRe) {
@@ -277,6 +280,7 @@ function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng,
     let cands = base.filter(tier).filter((e) => !dayUsed.has(e.id) && !dayUsed.has(e.name));
     const fresh0 = cands.filter((e) => !dayFamilies.has(familyOf(e.name)));
     if (fresh0.length) cands = fresh0; // sin repetir familia pesada en el día, salvo que no quede otra
+    else if (cands.length && cands.every((e) => DUP_FAMILIES.has(familyOf(e.name)))) { if (ctx) ctx.dupSkipped = true; continue; } // el mismo movimiento dos veces no suma: se refuerza el que ya está
     if (!cands.length) continue;
     // Canon de los programas de referentes: solo los 2 primeros grupos que existan en la sede (cambia de mes a mes sin salirse de lo clásico)
     if (slot.canon) {
@@ -353,8 +357,16 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
     const dayFamilies = new Set();
     const ctx = { effLevel, dayUsed, routineUsed, prevIds, rng, focus, dayFamilies };
     const fill = (slotName) => {
+      ctx.dupSkipped = false;
       const ex = pickForSlot(pool, SLOTS[slotName], ctx);
-      if (!ex) return false;
+      if (!ex) {
+        if (ctx.dupSkipped) { // ya hay ese movimiento hoy: en vez de repetirlo, una serie más (como los 6 x 15 de laterales de los programas PPL)
+          const fam = exercises.find((x) => DUP_FAMILIES.has(familyOf(poolById.get(x.exerciseId).name)) && SLOTS[slotName].targets.includes(poolById.get(x.exerciseId).target));
+          if (fam && fam.sets < 5) fam.sets += 1;
+          return true;
+        }
+        return false;
+      }
       dayUsed.add(ex.id);
       dayUsed.add(ex.name); // el dataset repite nombres con distinto id: dos "lever chest press" no pueden ir el mismo día
       routineUsed.add(ex.id);
@@ -398,8 +410,9 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       }
       while (exercises.length > floor && tooLong()) {
         let idx = -1;
-        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 3) idx = k;
-        if (idx === -1) idx = exercises.length - 1;
+        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 2) idx = k;
+        // un músculo que está solo una vez (ej.: el tríceps en un día de empuje) no se saca: antes se acepta pasarse unos minutos
+        if (idx === -1) { const last = exercises.length - 1; if (timesOf(tgt(exercises[last])) > 1 || exercises.length > floor + 2) idx = last; else break; }
         dropAt(idx);
       }
       exercises.forEach((x, k) => { x.position = k + 1; });

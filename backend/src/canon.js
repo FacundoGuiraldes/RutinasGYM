@@ -1,7 +1,8 @@
 // "Canon": los ejercicios que de verdad aparecen en los programas publicados por referentes.
-// Fuente: lectura de 10 programas completos (PHUL, Metallicadpa PPL, Coolcicada PPL, Dumbbell PPL, Arnold Split,
-// Bro Split, Lyle McDonald Generic Bulking, GZCL General Gainz Bodybuilding, 5/3/1 Boring But Big, Strong Curves)
-// más la guía de volumen de Renaissance Periodization y de Helms/Nuckols. Cada hueco tiene una lista ordenada:
+// Fuente: lectura de 21 programas completos (PHUL, Metallicadpa PPL, Coolcicada PPL, Dumbbell PPL, Arnold Split,
+// Bro Split, Lyle McDonald Generic Bulking, GZCL General Gainz Bodybuilding, 5/3/1 Boring But Big, Strong Curves,
+// Jay Cutler, Dorian Yates, Mike Mentzer, Steve Reeves, Jim Stoppani Shortcut to Size, Planet Fitness Hypertrophy,
+// GZCL Jacked & Tan 2.0, KONG, P-Zero, GZCL UHF, Bullmastiff) más la guía de volumen de Renaissance Periodization y de Helms/Nuckols. Cada hueco tiene una lista ordenada:
 // primero lo que más programas usan, después las alternativas habituales. Es una lista de nombres del dataset en inglés.
 // El generador elige solo entre los 2 primeros grupos que existan en la sede (así cambia de mes a mes sin salirse de lo clásico).
 const CANON = {
