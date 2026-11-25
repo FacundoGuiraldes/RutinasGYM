@@ -360,7 +360,7 @@ test("canon de programas de referentes: lo elegido sale de la lista clásica y n
         const e = by.get(x.exerciseId);
         if (e.role === "cardio") continue;
         total++;
-        if (["chestC", "backV", "backH", "delC", "delSide", "bi", "tri", "quadC", "hingeC", "legCurl", "legExt", "calf"].some((s) => canonRank(s, e.name) !== Infinity)) inCanon++;
+        if (Object.keys(require("../src/canon").CANON).some((s) => canonRank(s, e.name) !== Infinity)) inCanon++;
       }
     }
   }
