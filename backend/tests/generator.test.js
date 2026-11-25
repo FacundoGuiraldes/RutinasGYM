@@ -343,3 +343,27 @@ test("un día no repite dos peso muertos ni dos sentadillas pesadas", { skip }, 
   }
   await db.close();
 });
+
+test("canon de programas de referentes: lo elegido sale de la lista clásica y no se repite el mismo movimiento en el día", { skip }, async () => {
+  const { canonRank } = require("../src/canon");
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  let total = 0, inCanon = 0;
+  for (let id = 1; id <= 30; id++) for (const focus of ["hipertrofia", "general", "bajar_grasa"]) for (const level of [1, 2, 3]) for (const days of [3, 4, 6]) {
+    const r = generateRoutine({ pool, member: { id, level, daysPerWeek: days, focus, priorities: [], sessionMinutes: 60 }, cycleNumber: 1 });
+    for (const d of r.days) {
+      const names = d.exercises.map((x) => by.get(x.exerciseId).name);
+      assert.equal(new Set(names).size, names.length, "ningún ejercicio repetido en el día");
+      assert.ok(names.filter((n) => /pushdown/i.test(n)).length <= 1, `dos pushdown el mismo día: ${names}`);
+      for (const x of d.exercises) {
+        const e = by.get(x.exerciseId);
+        if (e.role === "cardio") continue;
+        total++;
+        if (["chestC", "backV", "backH", "delC", "delSide", "bi", "tri", "quadC", "hingeC", "legCurl", "legExt", "calf"].some((s) => canonRank(s, e.name) !== Infinity)) inCanon++;
+      }
+    }
+  }
+  assert.ok(inCanon / total > 0.9, `en el canon: ${(inCanon / total).toFixed(2)}`);
+  await db.close();
+});

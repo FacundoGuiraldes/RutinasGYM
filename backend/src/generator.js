@@ -5,6 +5,7 @@
 const { mulberry32, hashString, weightedPick } = require("./util");
 const { isBlocked } = require("./limitations");
 const { staple, isJunk } = require("./staples");
+const { canonRank } = require("./canon");
 
 const USABLE_ROLES = new Set(["compound", "isolation", "core", "cardio"]);
 
@@ -36,6 +37,8 @@ const SLOTS = {
   abs: { targets: ["abs"], roles: ["core"] },
   cardio: { targets: ["cardiovascular system"], roles: ["cardio"] },
 };
+
+for (const [k, v] of Object.entries(SLOTS)) v.canon = k; // cada hueco sabe qué lista del canon le corresponde
 
 // ---------- Plantillas de día ----------
 // slots: en orden de prioridad (si el día lleva pocos ejercicios, se cortan los últimos).
@@ -218,7 +221,17 @@ function schemeFor(ex, { focus, level, prog, isPriority = false, first = false }
 // ---------- Selección ----------
 
 // Familias de movimiento: en un mismo día no se repite el mismo patrón pesado (dos peso muertos, dos sentadillas).
-const familyOf = (name) => (/deadlift|good morning/i.test(name) ? "hinge" : /squat|leg press|hack/i.test(name) && !/split|lunge/i.test(name) ? "squat" : null);
+const familyOf = (name) => {
+  if (/deadlift|good morning/i.test(name)) return "hinge";
+  if (/squat|leg press|hack/i.test(name) && !/split|lunge/i.test(name)) return "squat";
+  // Dos variantes del mismo movimiento en el mismo día no suman nada: el segundo ejercicio tiene que ser otra cosa
+  if (/pushdown/i.test(name)) return "pushdown";
+  if (/lateral raise/i.test(name) && !/rear/i.test(name)) return "lateral";
+  if (/(bench|chest) press/i.test(name) && !/incline|decline/i.test(name)) return "flatpress";
+  if (/incline.*(bench|chest) press/i.test(name)) return "inclinepress";
+  if (/pulldown|pull-up|chin-up/i.test(name) && !/straight arm/i.test(name)) return "vpull";
+  return null;
+};
 
 // Ejercicios que cargan el músculo en posición estirada (long muscle length). La evidencia reciente
 // los favorece para hipertrofia, así que en ese enfoque pesan más al sortear entre candidatos.
@@ -261,10 +274,20 @@ function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng,
     () => true,
   ];
   for (const tier of tiers) {
-    let cands = base.filter(tier).filter((e) => !dayUsed.has(e.id));
+    let cands = base.filter(tier).filter((e) => !dayUsed.has(e.id) && !dayUsed.has(e.name));
     const fresh0 = cands.filter((e) => !dayFamilies.has(familyOf(e.name)));
     if (fresh0.length) cands = fresh0; // sin repetir familia pesada en el día, salvo que no quede otra
     if (!cands.length) continue;
+    // Canon de los programas de referentes: solo los 2 primeros grupos que existan en la sede (cambia de mes a mes sin salirse de lo clásico)
+    if (slot.canon) {
+      const ranked = cands.map((e) => ({ e, r: canonRank(slot.canon, e.name) })).filter((x) => x.r !== Infinity);
+      if (ranked.length) {
+        const best = Math.min(...ranked.map((x) => x.r));
+        cands = ranked.filter((x) => x.r <= best + 1).map((x) => x.e);
+      } else if (minQ > 0 && base.some((e) => canonRank(slot.canon, e.name) !== Infinity)) {
+        continue; // para sumar ejercicios de relleno: si los clásicos ya se usaron hoy, mejor no sumar que meter una rareza
+      }
+    }
     // Preferencia firme por los de toda la vida: lo demás solo entra si no queda ninguno de esos
     const proven = cands.filter((e) => e.role === "cardio" || staple(e.name) <= 2);
     if (proven.length) cands = proven;
@@ -333,6 +356,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       const ex = pickForSlot(pool, SLOTS[slotName], ctx);
       if (!ex) return false;
       dayUsed.add(ex.id);
+      dayUsed.add(ex.name); // el dataset repite nombres con distinto id: dos "lever chest press" no pueden ir el mismo día
       routineUsed.add(ex.id);
       if (familyOf(ex.name)) dayFamilies.add(familyOf(ex.name));
       const s = schemeFor(ex, { focus, level: member.level, prog: p, isPriority: priorityTargets.has(ex.target), first: exercises.length === 0 });
@@ -360,7 +384,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       const floor = focus === "fuerza" && target <= 45 ? 3 : 4;
       const tgt = (x) => poolById.get(x.exerciseId)?.target;
       const timesOf = (t) => exercises.filter((x) => tgt(x) === t).length;
-      const dropAt = (idx) => { dayUsed.delete(exercises[idx].exerciseId); exercises.splice(idx, 1); };
+      const dropAt = (idx) => { dayUsed.delete(exercises[idx].exerciseId); dayUsed.delete(poolById.get(exercises[idx].exerciseId)?.name); exercises.splice(idx, 1); };
       const tooLong = () => estimateMinutes(exercises) - target > 7;
       while (exercises.length > floor && tooLong()) {
         let idx = -1;
@@ -370,7 +394,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
         dropAt(idx);
       }
       for (let k = exercises.length - 1; k > 0 && tooLong(); k--) {
-        if (!priorityTargets.has(tgt(exercises[k])) && exercises[k].sets > 2) exercises[k].sets -= 1;
+        if (!priorityTargets.has(tgt(exercises[k])) && exercises[k].sets > (poolById.get(exercises[k].exerciseId)?.role === "compound" ? 3 : 2)) exercises[k].sets -= 1; // los principales no bajan de 3 series: antes se saca un ejercicio
       }
       while (exercises.length > floor && tooLong()) {
         let idx = -1;
@@ -381,7 +405,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       exercises.forEach((x, k) => { x.position = k + 1; });
       // La progresión mensual suma (o saca) ejercicios por día encima de lo que entra en el tiempo pedido
       for (let k = 0; k < p.extraPerDay; k++) fill(extras[k % extras.length]);
-      for (let k = 0; k > p.extraPerDay && exercises.length > 3; k--) { const last = exercises.pop(); dayUsed.delete(last.exerciseId); }
+      for (let k = 0; k > p.extraPerDay && exercises.length > 3; k--) { const last = exercises.pop(); dayUsed.delete(last.exerciseId); dayUsed.delete(poolById.get(last.exerciseId)?.name); }
     }
     // Bajar grasa: cierre con cardio
     if (focus === "bajar_grasa") fill("cardio");
