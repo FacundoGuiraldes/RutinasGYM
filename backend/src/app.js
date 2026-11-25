@@ -142,7 +142,8 @@ function createApp({
   }
   app.get("/s/:token", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
   app.get("/admin", (req, res) => res.sendFile(path.join(publicDir, "admin.html")));
-  app.use(express.static(publicDir, { index: "index.html", maxAge: "1h" }));
+  // Sin caché largo: así el panel y la app siempre muestran la versión nueva tras un deploy (el navegador revalida con ETag)
+  app.use(express.static(publicDir, { index: "index.html", maxAge: 0 }));
 
   // ============================================================
   // API DEL SOCIO
