@@ -1,7 +1,7 @@
 // Servicio de rutinas: crear el ciclo de un socio en la base y armar la vista que ve la app.
 
-const { generateRoutine, loadPool, DEFAULT_PROG } = require("./generator");
-const { equipmentInfo } = require("./equipment");
+const { generateRoutine, loadPool, DEFAULT_PROG, estimateMinutes } = require("./generator");
+const { equipmentInfo, targetLabel } = require("./equipment");
 const { localDate, addDays, weekStart } = require("./util");
 const { AppError } = require("./errors");
 
@@ -13,7 +13,10 @@ async function createRoutine(db, member, { cycleNumber, prog = DEFAULT_PROG, pre
   const pool = await loadPool(db, member.sede_id);
   const gen = generateRoutine({
     pool,
-    member: { id: member.id, level: member.level, daysPerWeek: member.days_per_week, focus: member.focus },
+    member: {
+      id: member.id, level: member.level, daysPerWeek: member.days_per_week, focus: member.focus,
+      gender: member.gender, priorities: member.priorities, sessionMinutes: member.session_minutes,
+    },
     cycleNumber,
     prog,
     prevIds,
@@ -86,6 +89,9 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       level: member.level,
       daysPerWeek: member.days_per_week,
       focus: member.focus,
+      gender: member.gender ?? null,
+      priorities: member.priorities ?? null,
+      sessionMinutes: member.session_minutes ?? null,
     },
     routine: null,
   };
@@ -139,10 +145,12 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       cycleNumber: routine.cycle_number,
       startsOn: routine.starts_on,
       endsOn: routine.ends_on,
+      priorities: routine.params?.priorities ?? [],
       days: days.map((d) => ({
         id: d.id,
         dayIndex: d.day_index,
         label: d.label,
+        estMinutes: estimateMinutes(exs.filter((x) => x.day_id === d.id).map((x) => ({ sets: x.sets, restSec: x.rest_sec }))),
         completedToday: Boolean(todaySessions.get(d.id)?.completed_at),
         exercises: exs
           .filter((x) => x.day_id === d.id)
@@ -159,6 +167,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
               id: x.exercise_id,
               name: x.name,
               target: x.target,
+              targetLabel: targetLabel(x.target),
               equipment: x.equipment,
               equipmentLabel: equipmentInfo(x.equipment).label,
               secondary: x.secondary_muscles ?? [],

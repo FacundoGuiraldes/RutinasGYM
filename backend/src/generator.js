@@ -6,18 +6,10 @@ const { mulberry32, hashString, weightedPick } = require("./util");
 
 const USABLE_ROLES = new Set(["compound", "isolation", "core", "cardio"]);
 
+const { equipmentWeight } = require("./equipment");
+
 const DEFAULT_PROG = { setsBonus: 0, extraPerDay: 0, levelBoost: 0, loadStep: 0 };
 
-// Qué tan "normal" es cada equipamiento en un gimnasio: pesa en el sorteo
-const EQUIP_WEIGHT = {
-  barbell: 3, dumbbell: 3, cable: 3, "leverage machine": 3, "smith machine": 2.5, "body weight": 2.5,
-  "ez barbell": 2, kettlebell: 1.5, assisted: 1.5, "sled machine": 1.5, band: 1, "resistance band": 1,
-  weighted: 1, rope: 1, "olympic barbell": 1, "trap bar": 1, "stability ball": 0.8, "medicine ball": 0.8,
-  "wheel roller": 0.7, "bosu ball": 0.5, "stationary bike": 2, "elliptical machine": 2, "stepmill machine": 2,
-  "skierg machine": 1.5, "upper body ergometer": 1,
-  // elementos deducidos de ejercicios de peso corporal (ver equipment.js): pesan como peso corporal
-  "pull-up bar": 2.5, "dip bars": 2.5, "bench or box": 2.5,
-};
 
 // ---------- Slots: "qué hueco hay que llenar" ----------
 const SLOTS = {
@@ -69,6 +61,83 @@ const SPLITS = {
 
 const BASE_COUNT = { 1: 5, 2: 6, 3: 7 }; // ejercicios por día según nivel (sin contar cardio)
 const MAX_PER_DAY = 9;
+const MAX_PER_DAY_PRIORITY = 11; // con zonas prioritarias el día puede llevar un par más
+const SESSION_DELTA = { 45: -1, 60: 0, 75: 1 }; // minutos por sesión -> ejercicios de más o de menos
+const SESSION_MINUTES = Object.keys(SESSION_DELTA).map(Number);
+
+// Hipertrofia: cada músculo se entrena 2 veces por semana (lo que mejor funciona con volumen moderado).
+// Con 3 días y nivel intermedio o avanzado: superior, inferior y cuerpo completo.
+function splitFor({ daysPerWeek, focus, level }) {
+  if (focus === "hipertrofia" && daysPerWeek === 3 && level >= 2) return ["upperA", "lowerA", "fullC"];
+  return SPLITS[daysPerWeek];
+}
+
+// ---------- Zonas prioritarias (hipertrofia) ----------
+// slots: ejercicios de la zona dentro de los días; lead: el que va primero (con el músculo fresco);
+// extra: series de más para esa zona; targets: músculos del dataset que cuentan como la zona.
+const ZONES = {
+  pecho: { label: "Pecho", lead: "chestC", slots: ["chestC", "chestI"], extra: ["chestI", "chestC"], targets: ["pectorals"] },
+  espalda: { label: "Espalda", lead: "backV", slots: ["backV", "backH", "backI"], extra: ["backI", "backH"], targets: ["lats", "upper back", "traps"] },
+  hombros: { label: "Hombros", lead: "delC", slots: ["delC", "delSide", "delRear"], extra: ["delSide", "delRear"], targets: ["delts"] },
+  brazos: { label: "Brazos", lead: "bi", slots: ["bi", "tri"], extra: ["tri", "bi"], targets: ["biceps", "triceps", "forearms"] },
+  piernas: { label: "Piernas", lead: "quadC", slots: ["quadC", "legExt", "legCurl", "lunge", "hingeC", "calf"], extra: ["legExt", "legCurl"], targets: ["quads", "hamstrings", "calves", "adductors", "abductors"] },
+  gluteos: { label: "Glúteos", lead: "hingeC", slots: ["gluteI", "hingeC", "lunge"], extra: ["gluteI", "gluteI"], targets: ["glutes"] },
+  abdomen: { label: "Abdomen", lead: "abs", slots: ["abs"], extra: ["abs"], targets: ["abs"] },
+};
+const ZONE_KEYS = Object.keys(ZONES);
+const MAX_PRIORITIES = 2;
+
+// Si el socio no eligió prioridad (por ejemplo lo cargó el profe sin ese dato), el género sugiere un énfasis habitual.
+const GENDER_DEFAULT_PRIORITIES = { mujer: ["gluteos", "piernas"], hombre: ["pecho", "hombros"] };
+
+function resolvePriorities({ focus, priorities, gender }) {
+  if (focus !== "hipertrofia") return { list: [], source: null };
+  if (Array.isArray(priorities)) {
+    const list = [...new Set(priorities)].filter((z) => ZONES[z]).slice(0, MAX_PRIORITIES);
+    return { list, source: "member" }; // lista vacía = "parejo": sin énfasis
+  }
+  return { list: GENDER_DEFAULT_PRIORITIES[gender] ?? [], source: "gender" };
+}
+
+// Que cada zona prioritaria se entrene al menos 2 veces por semana
+function ensureFrequency(daySlots, priorities) {
+  for (const z of priorities) {
+    const zone = ZONES[z];
+    const has = (names) => names.some((n) => zone.slots.includes(n));
+    let freq = daySlots.filter(has).length;
+    const without = daySlots.map((names, i) => ({ names, i })).filter((d) => !has(d.names)).sort((a, b) => a.names.length - b.names.length);
+    while (freq < 2 && without.length) {
+      const d = without.shift();
+      daySlots[d.i] = [...d.names, zone.lead, zone.extra[0]];
+      freq++;
+    }
+  }
+}
+
+// En cada día que entrena la zona: su ejercicio principal va primero y se suman ejercicios de volumen.
+function applyPriorities(names, priorities, level) {
+  let out = [...names];
+  let added = 0;
+  const extras = level === 1 ? 1 : 2;
+  for (const z of [...priorities].reverse()) { // al revés: la primera prioridad queda primera
+    const zone = ZONES[z];
+    if (!out.some((n) => zone.slots.includes(n))) continue;
+    const li = out.indexOf(zone.lead);
+    if (li > 0) { out.splice(li, 1); out.unshift(zone.lead); }
+    let last = -1;
+    out.forEach((n, i) => { if (zone.slots.includes(n)) last = i; });
+    out.splice(last + 1, 0, ...zone.extra.slice(0, extras));
+    added += extras;
+  }
+  return { names: out, added };
+}
+
+// Minutos estimados de una sesión: entrada en calor + (series x (40 s de trabajo + descanso))
+function estimateMinutes(exercises) {
+  let sec = 5 * 60;
+  for (const e of exercises) sec += e.restSec == null ? 12 * 60 : e.sets * (40 + e.restSec);
+  return Math.round(sec / 60 / 5) * 5;
+}
 
 // ---------- Series, repeticiones y descanso según el enfoque ----------
 const SCHEMES = {
@@ -81,7 +150,33 @@ const FOCUSES = Object.keys(SCHEMES);
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-function schemeFor(ex, { focus, level, prog }) {
+// Hipertrofia: lo pesado primero, volumen moderado, aislados a más repeticiones y la zona prioritaria con una serie más.
+function hypertrophyScheme(ex, { level, prog, isPriority, first }) {
+  const notes = [];
+  let sets, reps, rest;
+  if (ex.role === "compound") {
+    const heavy = first && level >= 2;
+    sets = heavy ? 4 : 3;
+    reps = heavy ? "6-8" : "8-12";
+    rest = heavy ? 120 : 90; // los pesados piden más pausa para sostener las repeticiones
+    if (level === 1) { sets = 3; reps = "8-12"; notes.push("Priorizá la técnica y dejá 2-3 repeticiones en reserva."); }
+    sets = clamp(sets + prog.setsBonus + (isPriority ? 1 : 0), 2, 5);
+    if (first && level >= 2) notes.push("En la última serie dejá 1-2 repeticiones en reserva.");
+    if (prog.loadStep > 0) notes.push("Si completás todas las series con buena técnica, subí un escalón de carga respecto del mes pasado.");
+  } else {
+    const high = ex.pattern === "shoulder_raise" || ex.pattern === "rear_delt" || ex.target === "calves";
+    sets = clamp(3 + (prog.setsBonus >= 2 ? 1 : 0) + (isPriority ? 1 : 0), 2, 5);
+    reps = high ? "12-20" : "10-15";
+    rest = high ? 60 : 75; // con más de 60 s entre series se rinde un poco mejor; pasados los 90 s ya no hay diferencia
+    notes.push(isPriority ? "Recorrido completo y controlá la fase de estiramiento. Terminá cerca del fallo (1-2 repeticiones en reserva)." : "Recorrido completo y controlado, con 1-3 repeticiones en reserva.");
+  }
+  return { sets, reps, rest, note: notes.join(" ") || null };
+}
+
+function schemeFor(ex, { focus, level, prog, isPriority = false, first = false }) {
+  if (focus === "hipertrofia" && (ex.role === "compound" || ex.role === "isolation")) {
+    return hypertrophyScheme(ex, { level, prog, isPriority, first });
+  }
   const table = SCHEMES[focus] ?? SCHEMES.general;
   if (ex.role === "cardio") {
     return { sets: 1, reps: focus === "bajar_grasa" ? "15-20 min" : "10-15 min", rest: null, note: "Ritmo moderado: tenés que poder hablar entrecortado." };
@@ -128,7 +223,7 @@ function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng 
     const list = fresh.length ? fresh : cands;
     return weightedPick(
       list,
-      (e) => (EQUIP_WEIGHT[e.equipment] ?? 0.3) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1),
+      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1),
       rng
     );
   }
@@ -146,21 +241,37 @@ function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng 
 function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = new Set() }) {
   const p = { ...DEFAULT_PROG, ...prog };
   const focus = FOCUSES.includes(member.focus) ? member.focus : "general";
-  const split = SPLITS[member.daysPerWeek];
+  const split = splitFor({ daysPerWeek: member.daysPerWeek, focus, level: member.level });
   if (!split) throw new Error(`daysPerWeek inválido: ${member.daysPerWeek} (debe ser 2 a 6)`);
   if (![1, 2, 3].includes(member.level)) throw new Error(`level inválido: ${member.level} (debe ser 1, 2 o 3)`);
+  const sessionMinutes = SESSION_MINUTES.includes(Number(member.sessionMinutes)) ? Number(member.sessionMinutes) : 60;
 
   const effLevel = Math.min(3, member.level + p.levelBoost);
   const rng = mulberry32(hashString(`${member.id}:${cycleNumber}`));
   const routineUsed = new Set();
   const warnings = [];
-  const count = Math.min(MAX_PER_DAY, BASE_COUNT[member.level] + p.extraPerDay);
+  const baseCount = clamp(BASE_COUNT[member.level] + SESSION_DELTA[sessionMinutes] + p.extraPerDay, 4, MAX_PER_DAY);
+  const { list: priorities, source: prioritiesSource } = resolvePriorities({ focus, priorities: member.priorities, gender: member.gender });
+  const priorityTargets = new Set(priorities.flatMap((z) => ZONES[z].targets));
+
+  // Slots de cada día (con extras si la progresión pide más ejercicios) y, en hipertrofia, ajustados a las prioridades
+  const daySlots = split.map((tplKey) => {
+    const tpl = TEMPLATES[tplKey];
+    const names = [...tpl.slots];
+    for (let k = 0; names.length < baseCount && k < 12; k++) names.push(tpl.extra[k % tpl.extra.length]);
+    return names;
+  });
+  if (priorities.length) ensureFrequency(daySlots, priorities);
 
   const days = split.map((tplKey, i) => {
     const tpl = TEMPLATES[tplKey];
-    const slotNames = [...tpl.slots];
-    // Si la progresión pide más ejercicios que los slots base, se suman los "extra" de la plantilla
-    for (let k = 0; slotNames.length < count && k < 12; k++) slotNames.push(tpl.extra[k % tpl.extra.length]);
+    let slotNames = daySlots[i];
+    let count = baseCount;
+    if (priorities.length) {
+      const r = applyPriorities(slotNames, priorities, member.level);
+      slotNames = r.names;
+      count = Math.min(MAX_PER_DAY_PRIORITY, baseCount + r.added);
+    }
 
     const dayUsed = new Set();
     const exercises = [];
@@ -170,7 +281,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       if (!ex) return false;
       dayUsed.add(ex.id);
       routineUsed.add(ex.id);
-      const s = schemeFor(ex, { focus, level: member.level, prog: p });
+      const s = schemeFor(ex, { focus, level: member.level, prog: p, isPriority: priorityTargets.has(ex.target), first: exercises.length === 0 });
       exercises.push({ exerciseId: ex.id, position: exercises.length + 1, sets: s.sets, reps: s.reps, restSec: s.rest, note: s.note });
       return true;
     };
@@ -183,13 +294,13 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
     // Bajar grasa: cierre con cardio
     if (focus === "bajar_grasa") fill("cardio");
 
-    return { dayIndex: i + 1, label: `Día ${i + 1} – ${tpl.name}`, exercises };
+    return { dayIndex: i + 1, label: `Día ${i + 1} – ${tpl.name}`, exercises, estMinutes: estimateMinutes(exercises) };
   });
 
   return {
     days,
     warnings,
-    params: { level: member.level, daysPerWeek: member.daysPerWeek, focus, effLevel, cycleNumber, prog: p },
+    params: { level: member.level, daysPerWeek: member.daysPerWeek, focus, effLevel, cycleNumber, prog: p, sessionMinutes, priorities, prioritiesSource, gender: member.gender ?? null },
   };
 }
 
@@ -202,6 +313,8 @@ async function loadPool(db, sedeId) {
      JOIN equipment q ON q.id = e.equipment_id
      JOIN sede_equipment se ON se.equipment_id = e.equipment_id AND se.sede_id = $1 AND se.available
      WHERE e.enabled
+       AND (e.extra_equipment_id IS NULL OR EXISTS (
+             SELECT 1 FROM sede_equipment s2 WHERE s2.sede_id = $1 AND s2.equipment_id = e.extra_equipment_id AND s2.available))
        AND e.role IS NOT NULL AND e.level IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM sede_exclusions x WHERE x.sede_id = $1 AND x.exercise_id = e.id)`,
     [sedeId]
@@ -220,4 +333,9 @@ module.exports = {
   TEMPLATES,
   SPLITS,
   FOCUSES,
+  ZONES,
+  ZONE_KEYS,
+  MAX_PRIORITIES,
+  SESSION_MINUTES,
+  estimateMinutes,
 };

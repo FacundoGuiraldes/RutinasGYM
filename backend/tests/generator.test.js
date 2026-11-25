@@ -141,3 +141,77 @@ test("generador: valida parámetros", () => {
   assert.throws(() => generateRoutine({ pool: [], member: { id: 1, level: 2, daysPerWeek: 7, focus: "general" } }), /daysPerWeek/);
   assert.throws(() => generateRoutine({ pool: [], member: { id: 1, level: 9, daysPerWeek: 3, focus: "general" } }), /level/);
 });
+
+// Series semanales por músculo de una rutina
+function weeklySets(routine, byId) {
+  const vol = {};
+  for (const d of routine.days) for (const e of d.exercises) { const t = byId.get(e.exerciseId).target; vol[t] = (vol[t] || 0) + e.sets; }
+  return vol;
+}
+
+test("hipertrofia: la zona priorizada recibe más series, entra primero y se entrena 2 veces por semana", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const byId = new Map(pool.map((e) => [e.id, e]));
+  const gen = (priorities, extra = {}) => generateRoutine({ pool, member: { id: 7, level: 2, daysPerWeek: 4, focus: "hipertrofia", priorities, sessionMinutes: 60, ...extra }, cycleNumber: 1 });
+
+  const even = weeklySets(gen([]), byId);
+  const glu = gen(["gluteos"]);
+  const gluVol = weeklySets(glu, byId);
+  assert.ok((gluVol.glutes || 0) > (even.glutes || 0), `glúteos con prioridad (${gluVol.glutes}) > parejo (${even.glutes})`);
+  const daysWithGlutes = glu.days.filter((d) => d.exercises.some((e) => byId.get(e.exerciseId).target === "glutes")).length;
+  assert.ok(daysWithGlutes >= 2, "frecuencia mínima de 2 por semana");
+  assert.deepEqual(glu.params.priorities, ["gluteos"]);
+
+  const chest = gen(["pecho"]);
+  assert.ok((weeklySets(chest, byId).pectorals || 0) > (even.pectorals || 0));
+  await db.close();
+});
+
+test("hipertrofia: sin prioridad elegida el género sugiere el énfasis, y 'parejo' ([]) lo respeta", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const base = { id: 9, level: 2, daysPerWeek: 4, focus: "hipertrofia", sessionMinutes: 60 };
+  const mujer = generateRoutine({ pool, member: { ...base, gender: "mujer", priorities: null }, cycleNumber: 1 });
+  const hombre = generateRoutine({ pool, member: { ...base, gender: "hombre", priorities: null }, cycleNumber: 1 });
+  const parejo = generateRoutine({ pool, member: { ...base, gender: "mujer", priorities: [] }, cycleNumber: 1 });
+  assert.deepEqual(mujer.params.priorities, ["gluteos", "piernas"]);
+  assert.deepEqual(hombre.params.priorities, ["pecho", "hombros"]);
+  assert.deepEqual(parejo.params.priorities, [], "elegir parejo no se pisa con el género");
+  await db.close();
+});
+
+test("hipertrofia: más minutos por sesión significan más ejercicios, y la duración estimada acompaña", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const count = (mins) => {
+    const r = generateRoutine({ pool, member: { id: 3, level: 2, daysPerWeek: 3, focus: "hipertrofia", priorities: [], sessionMinutes: mins }, cycleNumber: 1 });
+    return { n: r.days[0].exercises.length, est: r.days[0].estMinutes };
+  };
+  const a = count(45), b = count(75);
+  assert.ok(b.n > a.n, `75 min (${b.n}) > 45 min (${a.n}) ejercicios`);
+  assert.ok(b.est >= a.est);
+  await db.close();
+});
+
+test("hipertrofia: todas las combinaciones con prioridades y duraciones son válidas", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  let combos = 0;
+  for (const level of [1, 2, 3]) for (const daysPerWeek of [2, 3, 4, 5, 6]) for (const sessionMinutes of [45, 60, 75]) {
+    for (const priorities of [[], ["gluteos", "piernas"], ["pecho", "brazos"], ["espalda"], ["abdomen", "hombros"]]) {
+      const r = generateRoutine({ pool, member: { id: 21, level, daysPerWeek, focus: "hipertrofia", priorities, sessionMinutes, gender: "mujer" }, cycleNumber: 2 });
+      combos++;
+      assert.equal(r.days.length, daysPerWeek);
+      assert.deepEqual(r.warnings, [], `${level}/${daysPerWeek}/${sessionMinutes}/${priorities}`);
+      for (const d of r.days) {
+        const ids = d.exercises.map((x) => x.exerciseId);
+        assert.equal(new Set(ids).size, ids.length, "sin repetidos dentro del día");
+        assert.ok(d.exercises.length >= 4);
+        for (const x of d.exercises) assert.ok(x.sets >= 1 && x.sets <= 5);
+      }
+    }
+  }
+  assert.equal(combos, 225);
+  await db.close();
+});

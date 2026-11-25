@@ -3,7 +3,7 @@
 // exclusiones). Sirve igual para PGlite (tests) que para Postgres real.
 
 const { classifyExercise } = require("./classify");
-const { effectiveEquipment } = require("./equipment");
+const { effectiveEquipment, effectiveExtra } = require("./equipment");
 
 const SEDES = ["Martínez", "Olivos"];
 const BATCH = 200;
@@ -21,6 +21,7 @@ function toRow(raw, equipmentIdByKey) {
     muscle_group: raw.muscle_group ?? null,
     secondary_muscles: raw.secondary_muscles ?? [],
     equipment_id: equipmentIdByKey.get(effectiveEquipment(raw)),
+    extra_equipment_id: effectiveExtra(raw) ? equipmentIdByKey.get(effectiveExtra(raw)) : null,
     steps_es: stepsEs,
     steps_en: stepsEn,
     image_path: raw.image,
@@ -55,7 +56,7 @@ async function importCatalog(db, records, { sedes = SEDES, log = () => {} } = {}
   for (const nombre of sedes) {
     await db.query("INSERT INTO sedes (nombre) VALUES ($1) ON CONFLICT (nombre) DO NOTHING", [nombre]);
   }
-  const keys = [...new Set(records.map(effectiveEquipment))].sort();
+  const keys = [...new Set(records.flatMap((r) => [effectiveEquipment(r), effectiveExtra(r)]).filter(Boolean))].sort();
   for (const key of keys) {
     await db.query("INSERT INTO equipment (key) VALUES ($1) ON CONFLICT (key) DO NOTHING", [key]);
   }
@@ -74,20 +75,20 @@ async function importCatalog(db, records, { sedes = SEDES, log = () => {} } = {}
   for (let i = 0; i < rows.length; i += BATCH) {
     const lote = rows.slice(i, i + BATCH);
     await db.query(
-      `INSERT INTO exercises (id, name, body_part, target, muscle_group, secondary_muscles, equipment_id,
+      `INSERT INTO exercises (id, name, body_part, target, muscle_group, secondary_muscles, equipment_id, extra_equipment_id,
                               steps_es, steps_en, image_path, gif_path, attribution, media_id,
                               role, movement_pattern, level)
-       SELECT x.id, x.name, x.body_part, x.target, x.muscle_group, x.secondary_muscles, x.equipment_id,
+       SELECT x.id, x.name, x.body_part, x.target, x.muscle_group, x.secondary_muscles, x.equipment_id, x.extra_equipment_id,
               x.steps_es, x.steps_en, x.image_path, x.gif_path, x.attribution, x.media_id,
               x.role, x.movement_pattern, x.level
        FROM jsonb_to_recordset($1::jsonb) AS x(
          id text, name text, body_part text, target text, muscle_group text, secondary_muscles jsonb,
-         equipment_id int, steps_es jsonb, steps_en jsonb, image_path text, gif_path text,
+         equipment_id int, extra_equipment_id int, steps_es jsonb, steps_en jsonb, image_path text, gif_path text,
          attribution text, media_id text, role text, movement_pattern text, level int)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name, body_part = EXCLUDED.body_part, target = EXCLUDED.target,
          muscle_group = EXCLUDED.muscle_group, secondary_muscles = EXCLUDED.secondary_muscles,
-         equipment_id = EXCLUDED.equipment_id, steps_es = EXCLUDED.steps_es, steps_en = EXCLUDED.steps_en,
+         equipment_id = EXCLUDED.equipment_id, extra_equipment_id = EXCLUDED.extra_equipment_id, steps_es = EXCLUDED.steps_es, steps_en = EXCLUDED.steps_en,
          image_path = EXCLUDED.image_path, gif_path = EXCLUDED.gif_path,
          attribution = EXCLUDED.attribution, media_id = EXCLUDED.media_id,
          -- si lo corrigió el admin, se respeta; si no, se actualiza con las reglas

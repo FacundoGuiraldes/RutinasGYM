@@ -3,24 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1115">
+  <meta name="theme-color" content="#121719">
   <meta name="robots" content="noindex">
   <meta name="referrer" content="no-referrer">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="preload" href="/fonts/big-shoulders-display.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/instrument-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <title>Mi rutina</title>
 </head>
 <body>
-  <main id="app">
-    <p class="muted">Cargando…</p>
+  <main id="app" aria-busy="true">
+    <!-- Esqueleto: se ve al instante, antes de que llegue la rutina -->
+    <div class="boot" role="status" aria-label="Cargando tu rutina">
+      <div class="boot-head"><div class="plate-spinner"></div><div class="grow"><div class="sk" style="height:34px;width:60%"></div><div class="sk" style="height:12px;width:40%;margin-top:10px"></div></div></div>
+      <div class="sk" style="height:84px;margin-top:6px"></div>
+      <div class="card">
+        <div class="sk" style="height:26px;width:50%;margin-bottom:6px"></div>
+        <div class="sk-row"><div class="sk thumb"></div><div><div class="sk l1"></div><div class="sk l2"></div><div class="sk l3"></div></div><div class="sk dot"></div></div>
+        <div class="sk-row"><div class="sk thumb"></div><div><div class="sk l1"></div><div class="sk l2"></div><div class="sk l3"></div></div><div class="sk dot"></div></div>
+      </div>
+    </div>
   </main>
 
   <!-- Cómo se hace el ejercicio -->
   <dialog id="howDialog">
     <div class="row spread"><h3 id="howTitle"></h3><button class="small ghost" data-close>Cerrar</button></div>
-    <img id="howGif" class="gif" alt="" loading="lazy">
+    <div class="sk gif" id="howSk"></div>
+    <img id="howGif" class="gif hidden" alt="">
     <p class="muted" id="howMuscles"></p>
     <ol class="steps" id="howSteps"></ol>
   </dialog>
@@ -32,7 +44,7 @@
     <label for="swapReason">¿Por qué querés cambiarlo? (opcional)</label>
     <textarea id="swapReason" maxlength="300" placeholder="Ej: no encuentro la máquina, prefiero con mancuernas, me molesta la rodilla…"></textarea>
     <p class="muted small">Te busco uno que trabaje lo mismo y que haya en tu sede.</p>
-    <div class="row" style="margin-top:12px">
+    <div class="row" style="margin-top:14px">
       <button class="ghost grow" data-close>Cancelar</button>
       <button class="primary grow" id="swapGo">Buscar reemplazo</button>
     </div>

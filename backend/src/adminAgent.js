@@ -290,7 +290,7 @@ function makeExecutors(db, ai) {
       );
       const out = { sede: s.nombre, equipment: hit.key, available: Boolean(available), ruleSaved: true };
       if (!available && apply_to_active_routines) {
-        const { rows: ex } = await db.query("SELECT id FROM exercises WHERE equipment_id = $1", [hit.id]);
+        const { rows: ex } = await db.query("SELECT id FROM exercises WHERE equipment_id = $1 OR extra_equipment_id = $1", [hit.id]);
         out.activeRoutines = summarize(await replaceEverywhereInSede(db, ai, { sedeId: s.id, exerciseIds: ex.map((e) => e.id), reason: `La sede no tiene ${hit.key}` }));
       }
       return out;

@@ -157,3 +157,12 @@ CREATE TABLE IF NOT EXISTS change_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS change_logs_review_idx ON change_logs (needs_review, reviewed_at);
+
+-- Segundo requisito de un ejercicio además del equipamiento principal (banco, rack). Opcional.
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS extra_equipment_id INT REFERENCES equipment(id);
+CREATE INDEX IF NOT EXISTS exercises_extra_equipment_idx ON exercises (extra_equipment_id);
+
+-- Datos para planificar mejor la rutina (se piden en el onboarding)
+ALTER TABLE members ADD COLUMN IF NOT EXISTS gender TEXT;                         -- mujer | hombre | otro
+ALTER TABLE members ADD COLUMN IF NOT EXISTS priorities JSONB;                    -- zonas a priorizar en hipertrofia; NULL = no se preguntó, [] = parejo
+ALTER TABLE members ADD COLUMN IF NOT EXISTS session_minutes INT;                 -- 45 | 60 | 75

@@ -510,3 +510,34 @@ test("equipamiento en español: máquinas y elementos por sede, peso corporal si
   assert.ok(!ALL_EX(v).some((x) => x.exercise.equipment === "pull-up bar"));
   await t.close();
 });
+
+test("perfil: género, duración y zonas se guardan en el onboarding y se validan", { skip }, async () => {
+  const t = await setup();
+  const m = await t.createMember({ nombre: "Lara", sedeId: 1 });
+  const bad = (body) => t.call("POST", "/api/me/onboarding", { token: m.token, body: { level: 2, daysPerWeek: 4, focus: "hipertrofia", ...body } });
+  assert.equal((await bad({ gender: "marciano" })).status, 400);
+  assert.equal((await bad({ sessionMinutes: 20 })).status, 400);
+  assert.equal((await bad({ priorities: ["pecho", "espalda", "brazos"] })).status, 400, "máximo 2 zonas");
+  assert.equal((await bad({ priorities: ["cuello"] })).status, 400);
+
+  const ok = await bad({ gender: "mujer", priorities: ["gluteos"], sessionMinutes: 75 });
+  assert.equal(ok.status, 201, JSON.stringify(ok.json));
+  assert.equal(ok.json.member.gender, "mujer");
+  assert.deepEqual(ok.json.member.priorities, ["gluteos"]);
+  assert.equal(ok.json.member.sessionMinutes, 75);
+  assert.ok(ok.json.routine.days.every((d) => d.estMinutes > 0));
+
+  // Fuera de hipertrofia las zonas no aplican
+  const m2 = await t.createMember({ nombre: "Beto", sedeId: 1 });
+  const r2 = await t.call("POST", "/api/me/onboarding", { token: m2.token, body: { level: 1, daysPerWeek: 3, focus: "fuerza", priorities: ["pecho"] } });
+  assert.equal(r2.status, 201);
+  assert.equal(r2.json.member.priorities, null);
+
+  // El profe puede rehacer con otras zonas
+  const re = await t.adminApi("POST", `/api/admin/members/${m.id}/regenerate`, { focus: "hipertrofia", priorities: ["espalda", "brazos"], gender: "hombre" });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  const d = (await t.adminApi("GET", `/api/admin/members/${m.id}`)).json;
+  assert.deepEqual(d.member.priorities, ["espalda", "brazos"]);
+  assert.equal(d.member.gender, "hombre");
+  await t.close();
+});

@@ -10,10 +10,28 @@ const { createRoutine, getActiveRoutine, buildMemberView, WEEKS_PER_CYCLE } = re
 const { replaceRoutineExercise, replaceEverywhereInSede } = require("./replace");
 const { closeDueCycles } = require("./progression");
 const { runAgent } = require("./adminAgent");
-const { FOCUSES } = require("./generator");
-const { EQUIPMENT, equipmentInfo } = require("./equipment");
+const { FOCUSES, ZONE_KEYS, MAX_PRIORITIES, SESSION_MINUTES } = require("./generator");
+const { EQUIPMENT, equipmentInfo, targetLabel, TARGET_ES } = require("./equipment");
 
 const ROLES = ["compound", "isolation", "core", "cardio", "mobility", "other"];
+
+const GENDERS = ["mujer", "hombre", "otro"];
+
+// Género, zonas a priorizar (solo hipertrofia) y minutos por sesión. Todo opcional: lo que falte lo resuelve el generador.
+function parseProfile(body, focus, fallback = {}) {
+  const genderRaw = body.gender ?? fallback.gender ?? null;
+  if (genderRaw !== null && !GENDERS.includes(genderRaw)) throw new AppError(400, "VALIDATION", `gender debe ser uno de: ${GENDERS.join(", ")}`);
+  const minutesRaw = body.sessionMinutes ?? fallback.session_minutes ?? null;
+  if (minutesRaw !== null && !SESSION_MINUTES.includes(Number(minutesRaw))) throw new AppError(400, "VALIDATION", `sessionMinutes debe ser uno de: ${SESSION_MINUTES.join(", ")}`);
+  let priorities = body.priorities ?? fallback.priorities ?? null;
+  if (focus !== "hipertrofia") priorities = null;
+  else if (priorities !== null) {
+    if (!Array.isArray(priorities) || priorities.some((z) => !ZONE_KEYS.includes(z))) throw new AppError(400, "VALIDATION", `priorities debe ser una lista de: ${ZONE_KEYS.join(", ")}`);
+    if (new Set(priorities).size > MAX_PRIORITIES) throw new AppError(400, "VALIDATION", `Podés elegir hasta ${MAX_PRIORITIES} zonas para priorizar`);
+    priorities = [...new Set(priorities)];
+  }
+  return { gender: genderRaw, priorities, sessionMinutes: minutesRaw === null ? null : Number(minutesRaw) };
+}
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -161,11 +179,13 @@ function createApp({
     const focus = text(req.body.focus, "focus", { required: true });
     if (!FOCUSES.includes(focus)) throw new AppError(400, "VALIDATION", `focus debe ser uno de: ${FOCUSES.join(", ")}`);
     const notes = text(req.body.notes, "notes", { max: 500 });
+    const prof = parseProfile(req.body, focus);
 
     const { rows } = await db.query(
-      `UPDATE members SET level = $1, days_per_week = $2, focus = $3, notes = $4, onboarded_at = now()
+      `UPDATE members SET level = $1, days_per_week = $2, focus = $3, notes = $4, onboarded_at = now(),
+              gender = $6, priorities = $7::jsonb, session_minutes = $8
        WHERE id = $5 RETURNING *`,
-      [level, days, focus, notes || null, req.member.id]
+      [level, days, focus, notes || null, req.member.id, prof.gender, prof.priorities === null ? null : JSON.stringify(prof.priorities), prof.sessionMinutes]
     );
     const member = { ...rows[0], sede_nombre: req.member.sede_nombre };
     await createRoutine(db, member, { cycleNumber: 1 });
@@ -254,7 +274,9 @@ function createApp({
   admin.get("/sedes", h(async (req, res) => {
     const { rows: sedes } = await db.query("SELECT id, nombre FROM sedes ORDER BY id");
     const { rows: eq } = await db.query(
-      `SELECT se.sede_id, q.key, se.available FROM sede_equipment se JOIN equipment q ON q.id = se.equipment_id ORDER BY q.key`
+      `SELECT se.sede_id, q.key, se.available FROM sede_equipment se JOIN equipment q ON q.id = se.equipment_id
+       WHERE EXISTS (SELECT 1 FROM exercises e WHERE e.equipment_id = q.id OR e.extra_equipment_id = q.id)  -- sin ejercicios no hay nada que marcar
+       ORDER BY q.key`
     );
     const { rows: ex } = await db.query(
       `SELECT x.sede_id, e.id, e.name, x.reason FROM sede_exclusions x JOIN exercises e ON e.id = x.exercise_id ORDER BY e.name`
@@ -265,7 +287,7 @@ function createApp({
       equipment: eq
         .filter((e) => e.sede_id === s.id && equipmentInfo(e.key).kind !== "none")
         .map(({ key, available }) => ({ ...equipmentInfo(key), available }))
-        .sort((a, b) => (a.kind === b.kind ? a.label.localeCompare(b.label, "es") : a.kind === "machine" ? -1 : 1)),
+        .sort((a, b) => a.group.localeCompare(b.group, "es") || a.label.localeCompare(b.label, "es")),
       exclusions: ex.filter((e) => e.sede_id === s.id).map(({ id, name, reason }) => ({ id, name, reason })),
     })));
   }));
@@ -286,7 +308,7 @@ function createApp({
     await db.query(`INSERT INTO change_logs (actor, sede_id, action, payload) VALUES ('ADMIN', $1, 'set_equipment', $2::jsonb)`, [sedeId, JSON.stringify({ equipment: key, available })]);
     let applied = null;
     if (!available && req.body.apply !== false) {
-      const { rows: ex } = await db.query("SELECT id FROM exercises WHERE equipment_id = $1", [eq[0].id]);
+      const { rows: ex } = await db.query("SELECT id FROM exercises WHERE equipment_id = $1 OR extra_equipment_id = $1", [eq[0].id]);
       applied = await replaceEverywhereInSede(db, ai, { sedeId, exerciseIds: ex.map((e) => e.id), reason: `La sede no tiene ${key}` });
     }
     res.json({ ok: true, replaced: applied?.replaced.length ?? 0, failed: applied?.failed.length ?? 0 });
@@ -341,18 +363,19 @@ function createApp({
     const { rows: total } = await db.query(`SELECT COUNT(*)::int AS n FROM exercises e JOIN equipment q ON q.id = e.equipment_id ${w}`, params);
     const { rows } = await db.query(
       `SELECT e.id, e.name, e.target, e.role, e.movement_pattern AS pattern, e.level, e.enabled, e.classified_by,
-              q.key AS equipment, e.image_path
-       FROM exercises e JOIN equipment q ON q.id = e.equipment_id ${w}
+              q.key AS equipment, q2.key AS extra, e.image_path
+       FROM exercises e JOIN equipment q ON q.id = e.equipment_id
+       LEFT JOIN equipment q2 ON q2.id = e.extra_equipment_id ${w}
        ORDER BY e.name, e.id LIMIT ${size} OFFSET ${(page - 1) * size}`,
       params
     );
-    res.json({ total: total[0].n, page, pageSize: size, items: rows.map((r) => ({ ...r, equipmentLabel: equipmentInfo(r.equipment).label, needs: equipmentInfo(r.equipment).kind, imageUrl: `${mediaBase.replace(/\/$/, "")}/${r.image_path}` })) });
+    res.json({ total: total[0].n, page, pageSize: size, items: rows.map((r) => ({ ...r, targetLabel: targetLabel(r.target), equipmentLabel: equipmentInfo(r.equipment).label + (r.extra ? ` + ${equipmentInfo(r.extra).label}` : ""), needs: equipmentInfo(r.equipment).kind, imageUrl: `${mediaBase.replace(/\/$/, "")}/${r.image_path}` })) });
   }));
 
   admin.get("/exercise-facets", h(async (req, res) => {
     const { rows: t } = await db.query("SELECT DISTINCT target FROM exercises ORDER BY target");
     const { rows: q } = await db.query("SELECT key FROM equipment ORDER BY key");
-    res.json({ targets: t.map((x) => x.target), equipment: q.map((x) => equipmentInfo(x.key)), roles: ROLES });
+    res.json({ targets: t.map((x) => x.target), targetLabels: TARGET_ES, zones: ZONE_KEYS, sessionMinutes: SESSION_MINUTES, equipment: q.map((x) => equipmentInfo(x.key)), roles: ROLES });
   }));
 
   admin.patch("/exercises/:id", h(async (req, res) => {
@@ -415,10 +438,11 @@ function createApp({
       focus = text(req.body.focus, "focus", { required: true });
       if (!FOCUSES.includes(focus)) throw new AppError(400, "VALIDATION", `focus debe ser uno de: ${FOCUSES.join(", ")}`);
     }
+    const prof = hasPrefs ? parseProfile(req.body, focus) : { gender: null, priorities: null, sessionMinutes: null };
     const { rows } = await db.query(
-      `INSERT INTO members (nombre, sede_id, access_token, level, days_per_week, focus, notes, onboarded_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, ${hasPrefs ? "now()" : "NULL"}) RETURNING *`,
-      [nombre, sedeId, randomToken(), level, days, focus, notes || null]
+      `INSERT INTO members (nombre, sede_id, access_token, level, days_per_week, focus, notes, onboarded_at, gender, priorities, session_minutes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, ${hasPrefs ? "now()" : "NULL"}, $8, $9::jsonb, $10) RETURNING *`,
+      [nombre, sedeId, randomToken(), level, days, focus, notes || null, prof.gender, prof.priorities === null ? null : JSON.stringify(prof.priorities), prof.sessionMinutes]
     );
     if (hasPrefs) await createRoutine(db, rows[0], { cycleNumber: 1 });
     res.status(201).json({ id: rows[0].id, nombre, link: linkFor(req, rows[0].access_token), onboarded: Boolean(hasPrefs) });
@@ -441,7 +465,7 @@ function createApp({
       [m.id]
     );
     res.json({
-      member: { id: m.id, nombre: m.nombre, sedeId: m.sede_id, sede: m.sede_nombre, active: m.active, level: m.level, daysPerWeek: m.days_per_week, focus: m.focus, notes: m.notes },
+      member: { id: m.id, nombre: m.nombre, sedeId: m.sede_id, sede: m.sede_nombre, active: m.active, level: m.level, daysPerWeek: m.days_per_week, focus: m.focus, notes: m.notes, gender: m.gender ?? null, priorities: m.priorities ?? null, sessionMinutes: m.session_minutes ?? null },
       link: linkFor(req, m.access_token),
       view: await memberView(m),
       history,
@@ -471,14 +495,16 @@ function createApp({
     const days = int(req.body.daysPerWeek ?? m.days_per_week, "daysPerWeek", 2, 6);
     const focus = text(req.body.focus ?? m.focus, "focus", { required: true });
     if (!FOCUSES.includes(focus)) throw new AppError(400, "VALIDATION", `focus debe ser uno de: ${FOCUSES.join(", ")}`);
+    const prof = parseProfile(req.body, focus, m);
     const { rows } = await db.query(
-      `UPDATE members SET level = $1, days_per_week = $2, focus = $3, onboarded_at = COALESCE(onboarded_at, now()) WHERE id = $4 RETURNING *`,
-      [level, days, focus, id]
+      `UPDATE members SET level = $1, days_per_week = $2, focus = $3, onboarded_at = COALESCE(onboarded_at, now()),
+              gender = $5, priorities = $6::jsonb, session_minutes = $7 WHERE id = $4 RETURNING *`,
+      [level, days, focus, id, prof.gender, prof.priorities === null ? null : JSON.stringify(prof.priorities), prof.sessionMinutes]
     );
     const { rows: last } = await db.query("SELECT COALESCE(MAX(cycle_number), 0)::int AS n FROM routines WHERE member_id = $1", [id]);
     await db.query("UPDATE routines SET status = 'FINISHED' WHERE member_id = $1 AND status = 'ACTIVE'", [id]);
     const r = await createRoutine(db, rows[0], { cycleNumber: last[0].n + 1 });
-    await db.query(`INSERT INTO change_logs (actor, member_id, sede_id, action, payload) VALUES ('ADMIN', $1, $2, 'regenerate_routine', $3::jsonb)`, [id, m.sede_id, JSON.stringify({ level, days, focus })]);
+    await db.query(`INSERT INTO change_logs (actor, member_id, sede_id, action, payload) VALUES ('ADMIN', $1, $2, 'regenerate_routine', $3::jsonb)`, [id, m.sede_id, JSON.stringify({ level, days, focus, gender: prof.gender, priorities: prof.priorities, sessionMinutes: prof.sessionMinutes })]);
     res.json({ ok: true, routineId: r.routineId, warnings: r.warnings });
   }));
 
