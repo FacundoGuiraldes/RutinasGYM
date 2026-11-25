@@ -4,6 +4,7 @@
 
 const { mulberry32, hashString, weightedPick } = require("./util");
 const { isBlocked } = require("./limitations");
+const { staple, isJunk } = require("./staples");
 
 const USABLE_ROLES = new Set(["compound", "isolation", "core", "cardio"]);
 
@@ -20,8 +21,8 @@ const SLOTS = {
   backH: { targets: ["upper back", "lats"], roles: ["compound"], patterns: ["horizontal_pull"] },
   backI: { targets: ["lats", "upper back"], roles: ["isolation"] },
   delC: { targets: ["delts"], roles: ["compound"], patterns: ["vertical_push"] },
-  delSide: { targets: ["delts"], roles: ["isolation"], patterns: ["shoulder_raise"] },
-  delRear: { targets: ["delts"], roles: ["isolation", "compound"], patterns: ["rear_delt"] },
+  delSide: { targets: ["delts"], roles: ["isolation"], patterns: ["shoulder_raise"], nameRe: /lateral raise/i, notRe: /rear|reverse|front/i },
+  delRear: { targets: ["delts"], roles: ["isolation", "compound"], patterns: ["rear_delt"], nameRe: /rear|reverse fly|face pull/i },
   trap: { targets: ["traps"], roles: ["isolation", "compound"] },
   bi: { targets: ["biceps"], roles: ["isolation", "compound"] },
   tri: { targets: ["triceps"], roles: ["isolation", "compound"] },
@@ -41,12 +42,13 @@ const SLOTS = {
 // extra: ejercicios adicionales cuando la progresión sube la cantidad por día.
 const TEMPLATES = {
   fullA: { name: "Cuerpo completo A", slots: ["quadC", "chestC", "backV", "legCurl", "delSide", "abs", "bi"], extra: ["tri", "calf", "gluteI"] },
-  fullB: { name: "Cuerpo completo B", slots: ["hingeC", "delC", "backH", "lunge", "tri", "abs", "calf"], extra: ["bi", "chestI", "delSide"] },
-  fullC: { name: "Cuerpo completo C", slots: ["lunge", "chestC", "backH", "legCurl", "bi", "tri", "abs"], extra: ["delSide", "calf", "gluteI"] },
-  upperA: { name: "Tren superior A", slots: ["chestC", "backV", "delC", "backH", "bi", "tri", "delSide"], extra: ["chestI", "delRear", "abs"] },
-  upperB: { name: "Tren superior B", slots: ["chestC", "backH", "delC", "backV", "chestI", "delRear", "bi", "tri"], extra: ["tri", "bi", "abs"] },
+  // Cuerpo completo: pecho, espalda, hombros y piernas aparecen en cada día de los que haya, para llegar a 2 veces por semana con 2 días
+  fullB: { name: "Cuerpo completo B", slots: ["hingeC", "chestC", "backH", "delC", "lunge", "tri", "calf", "abs"], extra: ["bi", "chestI", "delSide"] },
+  fullC: { name: "Cuerpo completo C", slots: ["lunge", "chestC", "backH", "delSide", "legCurl", "bi", "tri", "abs"], extra: ["calf", "gluteI", "chestI"] },
+  upperA: { name: "Tren superior A", slots: ["chestC", "backV", "backH", "delSide", "bi", "tri", "delC"], extra: ["chestI", "delRear", "abs"] },
+  upperB: { name: "Tren superior B", slots: ["chestC", "backH", "delC", "backV", "bi", "tri", "chestI", "delRear"], extra: ["tri", "bi", "abs"] },
   lowerA: { name: "Tren inferior A", slots: ["quadC", "hingeC", "lunge", "legCurl", "calf", "abs", "gluteI"], extra: ["legExt", "calf"] },
-  lowerB: { name: "Tren inferior B", slots: ["hingeC", "quadC", "gluteI", "legExt", "calf", "abs", "lunge"], extra: ["legCurl", "abs"] },
+  lowerB: { name: "Tren inferior B", slots: ["hingeC", "quadC", "legCurl", "legExt", "gluteI", "calf", "abs", "lunge"], extra: ["legCurl", "abs"] },
   push: { name: "Empuje (pecho, hombros y tríceps)", slots: ["chestC", "delC", "chestI", "delSide", "tri", "tri"], extra: ["chestC", "delSide"] },
   pull: { name: "Tirón (espalda y bíceps)", slots: ["backV", "backH", "backI", "delRear", "bi", "bi"], extra: ["trap", "backH"] },
   legs: { name: "Piernas y glúteos", slots: ["quadC", "hingeC", "lunge", "legCurl", "legExt", "calf", "abs"], extra: ["gluteI", "calf"] },
@@ -150,7 +152,8 @@ function estimateMinutes(exercises) {
 const SCHEMES = {
   fuerza: { compound: { sets: 4, reps: "4-6", rest: 150 }, isolation: { sets: 3, reps: "8-10", rest: 90 } },
   hipertrofia: { compound: { sets: 4, reps: "8-10", rest: 90 }, isolation: { sets: 3, reps: "10-15", rest: 60 } },
-  bajar_grasa: { compound: { sets: 3, reps: "12-15", rest: 45 }, isolation: { sets: 3, reps: "15-20", rest: 40 } },
+  // Al comer menos, la fuerza y la masa muscular se conservan entrenando con cargas medias (8-12), no con "muchas repeticiones livianas"
+  bajar_grasa: { compound: { sets: 3, reps: "8-12", rest: 60 }, isolation: { sets: 3, reps: "12-15", rest: 45 } },
   general: { compound: { sets: 3, reps: "10-12", rest: 75 }, isolation: { sets: 3, reps: "12-15", rest: 60 } },
 };
 const FOCUSES = Object.keys(SCHEMES);
@@ -214,13 +217,16 @@ function schemeFor(ex, { focus, level, prog, isPriority = false, first = false }
 
 // ---------- Selección ----------
 
+// Familias de movimiento: en un mismo día no se repite el mismo patrón pesado (dos peso muertos, dos sentadillas).
+const familyOf = (name) => (/deadlift|good morning/i.test(name) ? "hinge" : /squat|leg press|hack/i.test(name) && !/split|lunge/i.test(name) ? "squat" : null);
+
 // Ejercicios que cargan el músculo en posición estirada (long muscle length). La evidencia reciente
 // los favorece para hipertrofia, así que en ese enfoque pesan más al sortear entre candidatos.
 const LENGTHENED = /incline (dumbbell |barbell |cable )?(press|curl|fly|flye)|romanian|stiff[- ]leg|good morning|overhead (triceps )?extension|french press|skull ?crusher|pull-?over|\bfly\b|\bflye\b|seated leg curl|lying leg curl|preacher curl|hack squat|bulgarian|split squat|front squat|full squat|cable crossover|\bdip\b|calf raise/i;
 // Ejercicios raros, de rehabilitación o demasiado livianos para el objetivo: se evitan salvo que no haya otra opción.
 const ODD = /\b(clock|cuban|stork|typewriter|archer|spider|dip cage|self assisted|inverse|isometric|bosu|behind (head|neck)|jefferson|zercher|bradford|sissy|pistol|bottoms|drag curl|on knees|kneeling push|wall|sphinx|stability ball|exercise ball|suspended|towel|poles?|modified|bench pull-?ups?|pelvic tilt|glute bridge|low glute|squat row|front raise|v\. 2)\b/i;
 const FILLER = /\b(front raise|wrist|finger|forearm|neck|plate|kickback|side bend|twist|rotation|jack ?knife|v-up)\b/i;
-const CANON = /^(barbell|dumbbell|smith|lever|cable|sled)?\s*(incline |decline )?(bench press|chest press|squat|full squat|front squat|romanian deadlift|deadlift|shoulder press|seated shoulder press|military press|bent over row|seated row|row|lat pulldown|pulldown|leg press|hip thrust|pull-?up|chin-?up|biceps curl|hammer curl|preacher curl|triceps extension|pushdown|lateral raise|leg curl|leg extension|calf raise|fly|lunge|crunch|leg raise)\b/i;
+const STAPLE_WEIGHT = { 1: 10, 2: 2, 3: 0.3 };
 function qualityWeight(e, focus) {
   let w = 1;
   if (ODD.test(e.name)) w *= 0.08;
@@ -234,31 +240,41 @@ function qualityWeight(e, focus) {
   // Peso corporal como ejercicio principal: solo sirven las dominadas, fondos y remos invertidos (se pueden hacer difíciles)
   if (e.role === "compound" && e.equipment === "body weight" && !/pull-?up|chin-?up|\bdips?\b|inverted row|muscle-?up/i.test(e.name) && focus !== "bajar_grasa") w *= 0.25;
   if (/good morning|scott press|full can|hammer press|off dumbbell|reverse grip|wide squat|side split/i.test(e.name)) w *= 0.25;
-  // Los básicos que arman una rutina de verdad
-  if (focus !== "bajar_grasa" && CANON.test(e.name)) w *= 2.5;
+  // Los de toda la vida (press de banco, sentadilla, remo, jalón...) dominan la elección; lo raro, solo si no hay otra cosa
+  if (e.role !== "cardio") w *= STAPLE_WEIGHT[staple(e.name)];
   return w;
 }
 const lengthenedBoost = (e, focus) => (focus === "hipertrofia" && LENGTHENED.test(e.name) ? 3.5 : 1);
 
 // Candidatos para un slot, relajando criterios de a poco si no hay ninguno:
 // 1) rol + patrón exactos, 2) solo rol, 3) cualquier ejercicio usable del músculo.
-function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng, focus }) {
-  const base = pool.filter((e) => USABLE_ROLES.has(e.role) && e.level <= effLevel && slot.targets.includes(e.target));
+function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng, focus, minQ = 0, dayFamilies = new Set() }) {
+  let base = pool.filter((e) => USABLE_ROLES.has(e.role) && e.level <= effLevel && slot.targets.includes(e.target) && (minQ <= 0 || qualityWeight(e, focus) >= minQ));
+  // Algunos huecos piden un ejercicio concreto (ej.: elevaciones LATERALES para el deltoides medio, no frontales)
+  if (slot.nameRe) {
+    const exact = base.filter((e) => slot.nameRe.test(e.name) && !(slot.notRe && slot.notRe.test(e.name)));
+    if (exact.length) base = exact;
+  }
   const tiers = [
     (e) => (!slot.roles || slot.roles.includes(e.role)) && (!slot.patterns || slot.patterns.includes(e.pattern)),
     (e) => !slot.roles || slot.roles.includes(e.role),
     () => true,
   ];
   for (const tier of tiers) {
-    const cands = base.filter(tier).filter((e) => !dayUsed.has(e.id));
+    let cands = base.filter(tier).filter((e) => !dayUsed.has(e.id));
+    const fresh0 = cands.filter((e) => !dayFamilies.has(familyOf(e.name)));
+    if (fresh0.length) cands = fresh0; // sin repetir familia pesada en el día, salvo que no quede otra
     if (!cands.length) continue;
+    // Preferencia firme por los de toda la vida: lo demás solo entra si no queda ninguno de esos
+    const proven = cands.filter((e) => e.role === "cardio" || staple(e.name) <= 2);
+    if (proven.length) cands = proven;
     const fresh = cands.filter((e) => !routineUsed.has(e.id));
     // Preferimos no repetir, pero no a costa de calidad: si lo "nuevo" es una rareza y hay un buen ejercicio ya usado, se repite ese
-    const good = (arr) => arr.some((e) => qualityWeight(e, focus) >= 0.3);
+    const good = (arr) => arr.some((e) => qualityWeight(e, focus) >= 1);
     const list = fresh.length && (good(fresh) || !good(cands)) ? fresh : cands;
     return weightedPick(
       list,
-      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * lengthenedBoost(e, focus) * qualityWeight(e, focus),
+      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 1.5 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * lengthenedBoost(e, focus) * qualityWeight(e, focus),
       rng
     );
   }
@@ -311,12 +327,14 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
 
     const dayUsed = new Set();
     const exercises = [];
-    const ctx = { effLevel, dayUsed, routineUsed, prevIds, rng, focus };
+    const dayFamilies = new Set();
+    const ctx = { effLevel, dayUsed, routineUsed, prevIds, rng, focus, dayFamilies };
     const fill = (slotName) => {
       const ex = pickForSlot(pool, SLOTS[slotName], ctx);
       if (!ex) return false;
       dayUsed.add(ex.id);
       routineUsed.add(ex.id);
+      if (familyOf(ex.name)) dayFamilies.add(familyOf(ex.name));
       const s = schemeFor(ex, { focus, level: member.level, prog: p, isPriority: priorityTargets.has(ex.target), first: exercises.length === 0 });
       exercises.push({ exerciseId: ex.id, position: exercises.length + 1, sets: s.sets, reps: s.reps, restSec: s.rest, note: s.note });
       return true;
@@ -332,7 +350,9 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       const target = sessionMinutes;
       const cap = priorities.length ? MAX_PER_DAY_PRIORITY : MAX_PER_DAY;
       const extras = [...tpl.extra, ...tpl.slots];
+      ctx.minQ = 3; // para completar tiempo solo entran ejercicios buenos (nunca una rareza de relleno)
       for (let k = 0; k < 12 && exercises.length < cap && estimateMinutes(exercises) < target - 7; k++) fill(extras[k % extras.length]);
+      ctx.minQ = 0;
       // Al recortar, cada músculo conserva al menos un ejercicio en el día:
       //  1) sale primero lo repetido de zonas NO prioritarias, 2) después el exceso de las prioritarias (más de 3 por músculo),
       //  3) si igual se pasa por mucho, lo último. Así la zona prioritaria sigue siendo la que más trabaja.
@@ -384,7 +404,7 @@ async function loadPool(db, sedeId, { limitations = [] } = {}) {
        AND NOT EXISTS (SELECT 1 FROM sede_exclusions x WHERE x.sede_id = $1 AND x.exercise_id = e.id)`,
     [sedeId]
   );
-  const ok = rows.filter((r) => !isBlocked(r.name, limitations));
+  const ok = rows.filter((r) => !isBlocked(r.name, limitations) && (r.role === "cardio" || !isJunk(r.name, r.equipment)));
   return ok.map((r) => ({ ...r, secondary: r.secondary_muscles ?? [] }));
 }
 

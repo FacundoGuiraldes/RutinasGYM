@@ -285,3 +285,61 @@ test("calidad de ejercicios: en ganar músculo no entran rarezas ni ejercicios q
   assert.ok(rare / total < 0.01, `${rare} de ${total} ejercicios raros`);
   await db.close();
 });
+
+test("básicos primero: casi todo lo que se elige es un ejercicio de toda la vida y nada de lo que nadie usa", { skip }, async () => {
+  const { staple, isJunk } = require("../src/staples");
+  assert.equal(staple("barbell bench press"), 1);
+  assert.equal(staple("lever leg extension"), 1);
+  assert.equal(isJunk("front lever", "body weight"), true);
+  assert.equal(isJunk("barbell snatch", "barbell"), true);
+  assert.equal(isJunk("dumbbell fly on exercise ball", "dumbbell"), true);
+  assert.equal(isJunk("resistance band leg extension", "resistance band"), true);
+  assert.equal(isJunk("barbell full squat", "barbell"), false);
+
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  assert.ok(!pool.some((e) => e.role !== "cardio" && isJunk(e.name, e.equipment)), "el pool no trae lo que nadie usa");
+  const by = new Map(pool.map((e) => [e.id, e]));
+  let total = 0, tier1 = 0, tier3 = 0;
+  for (let id = 1; id <= 25; id++) for (const focus of ["hipertrofia", "general", "fuerza", "bajar_grasa"]) for (const level of [1, 2, 3]) {
+    const r = generateRoutine({ pool, member: { id, level, daysPerWeek: 4, focus, priorities: [], sessionMinutes: 60 }, cycleNumber: 1 });
+    for (const d of r.days) for (const x of d.exercises) { const e = by.get(x.exerciseId); if (e.role === "cardio") continue; total++; const t = staple(e.name); if (t === 1) tier1++; if (t === 3) tier3++; }
+  }
+  assert.ok(tier1 / total > 0.7, `básicos ${(tier1 / total).toFixed(2)}`);
+  assert.equal(tier3, 0, "ningún ejercicio fuera de lo común cuando hay alternativas");
+  await db.close();
+});
+
+test("sustento: cada músculo grande se entrena 2 veces por semana y hombros llevan elevaciones laterales", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  const group = { pectorals: "pecho", lats: "espalda", "upper back": "espalda", delts: "hombros", quads: "piernas", glutes: "piernas", hamstrings: "piernas" };
+  for (const focus of ["hipertrofia", "general"]) for (const level of [1, 2, 3]) for (const daysPerWeek of [2, 3, 4, 5, 6]) {
+    const r = generateRoutine({ pool, member: { id: 3, level, daysPerWeek, focus, priorities: [], sessionMinutes: 60 }, cycleNumber: 1 });
+    const freq = {};
+    let lateral = 0;
+    for (const d of r.days) {
+      const seen = new Set();
+      for (const x of d.exercises) { const e = by.get(x.exerciseId); if (group[e.target]) seen.add(group[e.target]); if (/lateral raise/i.test(e.name) && !/rear|reverse/i.test(e.name)) lateral++; }
+      for (const g of seen) freq[g] = (freq[g] || 0) + 1;
+    }
+    for (const g of ["pecho", "espalda", "hombros", "piernas"]) assert.ok((freq[g] || 0) >= 2, `${g} ${freq[g] || 0}x (${focus}, N${level}, ${daysPerWeek} días)`);
+    if (daysPerWeek >= 4) assert.ok(lateral >= 1, `elevaciones laterales (${focus}, N${level}, ${daysPerWeek} días)`);
+  }
+  await db.close();
+});
+
+test("un día no repite dos peso muertos ni dos sentadillas pesadas", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  for (let id = 1; id <= 30; id++) for (const level of [1, 2, 3]) {
+    const r = generateRoutine({ pool, member: { id, level, daysPerWeek: 4, focus: "hipertrofia", priorities: [], sessionMinutes: 75 }, cycleNumber: 1 });
+    for (const d of r.days) {
+      const names = d.exercises.map((x) => by.get(x.exerciseId).name);
+      assert.ok(names.filter((n) => /deadlift|good morning/i.test(n)).length <= 1, `peso muertos repetidos: ${names.join(" | ")}`);
+    }
+  }
+  await db.close();
+});
