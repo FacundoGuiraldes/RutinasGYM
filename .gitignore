@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Dataset descargado: las imágenes/GIFs son © Gym visual, no se redistribuyen desde este repo
+backend/dataset/
+data-src/
+
+*.log
+.DS_Store

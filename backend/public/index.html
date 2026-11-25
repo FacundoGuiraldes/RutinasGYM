@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="robots" content="noindex">
+  <meta name="referrer" content="no-referrer">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/styles.css">
+  <title>Mi rutina</title>
+</head>
+<body>
+  <main id="app">
+    <p class="muted">Cargando…</p>
+  </main>
+
+  <!-- Cómo se hace el ejercicio -->
+  <dialog id="howDialog">
+    <div class="row spread"><h3 id="howTitle"></h3><button class="small ghost" data-close>Cerrar</button></div>
+    <img id="howGif" class="gif" alt="" loading="lazy">
+    <p class="muted" id="howMuscles"></p>
+    <ol class="steps" id="howSteps"></ol>
+  </dialog>
+
+  <!-- Pedir otro ejercicio -->
+  <dialog id="swapDialog">
+    <h3>Cambiar ejercicio</h3>
+    <p class="muted" id="swapCurrent"></p>
+    <label for="swapReason">¿Por qué querés cambiarlo? (opcional)</label>
+    <textarea id="swapReason" maxlength="300" placeholder="Ej: no encuentro la máquina, prefiero con mancuernas, me molesta la rodilla…"></textarea>
+    <p class="muted small">Te busco uno que trabaje lo mismo y que haya en tu sede.</p>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost grow" data-close>Cancelar</button>
+      <button class="primary grow" id="swapGo">Buscar reemplazo</button>
+    </div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
