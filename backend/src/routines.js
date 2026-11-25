@@ -1,6 +1,7 @@
 // Servicio de rutinas: crear el ciclo de un socio en la base y armar la vista que ve la app.
 
 const { generateRoutine, loadPool, DEFAULT_PROG, estimateMinutes } = require("./generator");
+const { areaLabels } = require("./limitations");
 const { equipmentInfo, targetLabel } = require("./equipment");
 const { localDate, addDays, weekStart } = require("./util");
 const { AppError } = require("./errors");
@@ -10,7 +11,7 @@ const WEEKS_PER_CYCLE = CYCLE_DAYS / 7;
 
 // Genera y guarda la rutina de un ciclo. Devuelve { routineId, warnings }.
 async function createRoutine(db, member, { cycleNumber, prog = DEFAULT_PROG, prevIds = new Set(), startsOn = localDate() } = {}) {
-  const pool = await loadPool(db, member.sede_id);
+  const pool = await loadPool(db, member.sede_id, { limitations: member.limitations ?? [] });
   const gen = generateRoutine({
     pool,
     member: {
@@ -79,6 +80,18 @@ function mediaUrl(base, p) {
   return `${base.replace(/\/$/, "")}/${p}`;
 }
 
+// Semana de descarga: la última semana del ciclo. Principiantes la hacen cada 8 semanas (ciclos pares);
+// intermedios y avanzados, cada 4. Se aplica al mostrar: mismo peso, la mitad de las series, lejos del fallo.
+function weekOfCycle(startsOn, today) {
+  const diff = Math.floor((new Date(`${today}T00:00:00Z`) - new Date(`${String(startsOn).slice(0, 10)}T00:00:00Z`)) / 86400000);
+  return Math.min(WEEKS_PER_CYCLE, Math.max(1, Math.floor(diff / 7) + 1));
+}
+function isDeloadWeek({ level, cycleNumber, startsOn, today }) {
+  const everyCycle = level >= 2;
+  return weekOfCycle(startsOn, today) === WEEKS_PER_CYCLE && (everyCycle || cycleNumber % 2 === 0);
+}
+const DELOAD_NOTE = "Semana de descarga: mismo peso y la mitad de las series, sin llegar al fallo.";
+
 // Todo lo que necesita la pantalla del socio en una sola llamada
 async function buildMemberView(db, member, { mediaBase = "/media", today = localDate() } = {}) {
   const base = {
@@ -92,6 +105,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       gender: member.gender ?? null,
       priorities: member.priorities ?? null,
       sessionMinutes: member.session_minutes ?? null,
+      limitations: areaLabels(member.limitations),
     },
     routine: null,
   };
@@ -106,7 +120,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
   );
   const { rows: exs } = await db.query(
     `SELECT re.id, re.day_id, re.position, re.sets, re.reps, re.rest_sec, re.note, re.replaced_from_id,
-            e.id AS exercise_id, e.name, e.target, e.secondary_muscles, e.gif_path, e.image_path,
+            e.id AS exercise_id, COALESCE(e.name_es, e.name) AS name, e.target, e.secondary_muscles, e.gif_path, e.image_path,
             e.steps_es, e.attribution, q.key AS equipment
      FROM routine_exercises re
      JOIN routine_days d ON d.id = re.day_id
@@ -134,6 +148,9 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
   );
   const doneToday = new Set(doneRows.map((r) => r.routine_exercise_id));
 
+  const deload = isDeloadWeek({ level: member.level ?? 1, cycleNumber: routine.cycle_number, startsOn: routine.starts_on, today });
+  if (deload) for (const x of exs) x.sets = Math.max(1, Math.ceil(x.sets / 2));
+
   const wk = weekStart(today);
   const weekDone = sessions.filter((s) => s.completed_at && s.session_date >= wk && s.session_date <= addDays(wk, 6)).length;
   const cycleDone = sessions.filter((s) => s.completed_at).length;
@@ -146,6 +163,9 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       startsOn: routine.starts_on,
       endsOn: routine.ends_on,
       priorities: routine.params?.priorities ?? [],
+      weekOfCycle: weekOfCycle(routine.starts_on, today),
+      deload,
+      deloadNote: deload ? DELOAD_NOTE : null,
       days: days.map((d) => ({
         id: d.id,
         dayIndex: d.day_index,
@@ -186,4 +206,4 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
   };
 }
 
-module.exports = { createRoutine, getActiveRoutine, previousExerciseIds, buildMemberView, CYCLE_DAYS, WEEKS_PER_CYCLE };
+module.exports = { isDeloadWeek, weekOfCycle, createRoutine, getActiveRoutine, previousExerciseIds, buildMemberView, CYCLE_DAYS, WEEKS_PER_CYCLE };

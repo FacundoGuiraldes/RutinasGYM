@@ -9,6 +9,7 @@ const { randomToken, safeEqual, localDate, weekStart, addDays } = require("./uti
 const { createRoutine, getActiveRoutine, buildMemberView, WEEKS_PER_CYCLE } = require("./routines");
 const { replaceRoutineExercise, replaceEverywhereInSede } = require("./replace");
 const { closeDueCycles } = require("./progression");
+const { interpretLimitations, interpretByWords, isBlocked, areaLabels } = require("./limitations");
 const { runAgent } = require("./adminAgent");
 const { FOCUSES, ZONE_KEYS, MAX_PRIORITIES, SESSION_MINUTES } = require("./generator");
 const { EQUIPMENT, equipmentInfo, targetLabel, TARGET_ES } = require("./equipment");
@@ -188,6 +189,12 @@ function createApp({
       [level, days, focus, notes || null, req.member.id, prof.gender, prof.priorities === null ? null : JSON.stringify(prof.priorities), prof.sessionMinutes]
     );
     const member = { ...rows[0], sede_nombre: req.member.sede_nombre };
+    // Si en las notas menciona una molestia, la rutina ya nace sin esos ejercicios
+    const noted = notes ? interpretByWords(notes) : [];
+    if (noted.length) {
+      await db.query("UPDATE members SET limitations = $1::jsonb WHERE id = $2", [JSON.stringify(noted), member.id]);
+      member.limitations = noted;
+    }
     await createRoutine(db, member, { cycleNumber: 1 });
     if (notes) {
       await db.query(
@@ -251,6 +258,36 @@ function createApp({
     res.json({ result, view: await memberView(req.member) });
   }));
 
+  // Lesiones y molestias: el socio lo cuenta con sus palabras, la IA lo interpreta y la rutina se ajusta sola
+  app.post("/api/me/limitations", requireMember, aiRateLimit, h(async (req, res) => {
+    const msg = text(req.body.text, "text", { max: 500, required: true });
+    const current = Array.isArray(req.member.limitations) ? req.member.limitations : [];
+    const { areas, reply, source } = await interpretLimitations(ai, msg, current);
+    await db.query("UPDATE members SET limitations = $1::jsonb WHERE id = $2", [JSON.stringify(areas), req.member.id]);
+    const member = { ...req.member, limitations: areas };
+
+    // Saca de la rutina activa lo que carga las zonas con molestia
+    const swapped = [];
+    const active = await getActiveRoutine(db, member.id);
+    if (active && areas.length) {
+      const { rows } = await db.query(
+        `SELECT re.id, e.name FROM routine_exercises re JOIN routine_days d ON d.id = re.day_id JOIN exercises e ON e.id = re.exercise_id WHERE d.routine_id = $1`,
+        [active.id]
+      );
+      for (const r of rows.filter((x) => isBlocked(x.name, areas))) {
+        try {
+          const out = await replaceRoutineExercise(db, ai, { routineExerciseId: r.id, memberId: member.id, actor: "SYSTEM", reason: `Molestia en ${areaLabels(areas).map((a) => a.label).join(", ")}` });
+          swapped.push({ from: out.from.name, to: out.to.name });
+        } catch { /* si no hay reemplazo posible, el ejercicio queda y lo ve el profe */ }
+      }
+    }
+    await db.query(
+      `INSERT INTO change_logs (actor, member_id, sede_id, action, payload, needs_review) VALUES ('MEMBER', $1, $2, 'limitations', $3::jsonb, TRUE)`,
+      [member.id, member.sede_id, JSON.stringify({ text: msg, areas, source, swapped: swapped.length })]
+    );
+    res.json({ areas: areaLabels(areas), swapped, reply: reply ?? (areas.length ? "Listo, cuidamos esas zonas en tu rutina." : "Anotado: sin molestias por ahora."), view: await memberView(member) });
+  }));
+
   // ============================================================
   // API ADMIN
   // ============================================================
@@ -266,7 +303,58 @@ function createApp({
               (SELECT COUNT(*)::int FROM change_logs WHERE needs_review AND reviewed_at IS NULL) AS to_review,
               (SELECT COUNT(*)::int FROM exercises WHERE enabled) AS exercises`
     );
-    res.json({ ...rows[0], aiEnabled: Boolean(ai?.enabled), aiModel: ai?.model ?? null });
+    res.json({ ...rows[0], aiEnabled: Boolean(ai?.enabled), aiModel: ai?.model ?? null, aiUsage: ai?.usage?.() ?? null });
+  }));
+
+  // ----- Respaldo: descarga de todo lo que no se puede regenerar -----
+  // (el catálogo de ejercicios se reimporta solo; acá van socios, rutinas, sedes, reglas y registros)
+
+  admin.get("/backup", h(async (req, res) => {
+    const tables = {
+      sedes: "SELECT * FROM sedes ORDER BY id",
+      sede_equipment: "SELECT se.sede_id, q.key AS equipment, se.available FROM sede_equipment se JOIN equipment q ON q.id = se.equipment_id ORDER BY 1, 2",
+      sede_exclusions: "SELECT * FROM sede_exclusions ORDER BY 1, 2",
+      exercise_overrides: "SELECT id, enabled, role, movement_pattern, level, classified_by FROM exercises WHERE classified_by = 'admin' OR NOT enabled ORDER BY id",
+      members: "SELECT * FROM members ORDER BY id",
+      routines: "SELECT * FROM routines ORDER BY id",
+      routine_days: "SELECT * FROM routine_days ORDER BY id",
+      routine_exercises: "SELECT * FROM routine_exercises ORDER BY id",
+      sessions: "SELECT * FROM sessions ORDER BY id",
+      session_exercises: "SELECT * FROM session_exercises ORDER BY 1, 2",
+      cycle_summaries: "SELECT * FROM cycle_summaries ORDER BY id",
+      change_logs: "SELECT * FROM change_logs ORDER BY id",
+    };
+    const out = { exportedAt: new Date().toISOString(), version: 1, tables: {} };
+    for (const [name, sql] of Object.entries(tables)) out.tables[name] = (await db.query(sql)).rows;
+    res.setHeader("Content-Disposition", `attachment; filename="respaldo-rutinas-${localDate()}.json"`);
+    res.json(out);
+  }));
+
+  // ----- Seguimiento: quién viene, quién se está cayendo -----
+
+  admin.get("/adherence", h(async (req, res) => {
+    const today = localDate();
+    const { rows } = await db.query(
+      `SELECT m.id, m.nombre, s.nombre AS sede, m.days_per_week, r.cycle_number, r.starts_on::text AS starts_on,
+              (SELECT MAX(ss.session_date)::text FROM sessions ss JOIN routine_days d ON d.id = ss.routine_day_id WHERE d.routine_id = r.id AND ss.completed_at IS NOT NULL) AS last_done,
+              (SELECT COUNT(*)::int FROM sessions ss JOIN routine_days d ON d.id = ss.routine_day_id WHERE d.routine_id = r.id AND ss.completed_at IS NOT NULL) AS cycle_done,
+              (SELECT c.decision FROM cycle_summaries c JOIN routines rr ON rr.id = c.routine_id WHERE rr.member_id = m.id ORDER BY c.id DESC LIMIT 1) AS last_decision
+       FROM members m JOIN sedes s ON s.id = m.sede_id
+       JOIN routines r ON r.member_id = m.id AND r.status = 'ACTIVE'
+       WHERE m.active AND m.onboarded_at IS NOT NULL`
+    );
+    const dayNum = (d) => Math.floor(new Date(`${d}T00:00:00Z`).getTime() / 86400000);
+    const items = rows.map((r) => {
+      const elapsedDays = Math.max(1, dayNum(today) - dayNum(r.starts_on) + 1);
+      const expected = Math.max(1, Math.min(r.days_per_week * WEEKS_PER_CYCLE, (r.days_per_week * elapsedDays) / 7));
+      const pct = Math.min(100, Math.round((r.cycle_done / expected) * 100));
+      const sinceDays = dayNum(today) - dayNum(r.last_done ?? r.starts_on);
+      const status = sinceDays >= 10 ? "inactivo" : pct < 60 && elapsedDays >= 7 ? "en_riesgo" : "al_dia";
+      return { id: r.id, nombre: r.nombre, sede: r.sede, cycleNumber: r.cycle_number, daysPerWeek: r.days_per_week, cycleDone: r.cycle_done, pacePct: pct, lastDone: r.last_done, daysSince: sinceDays, status, lastDecision: r.last_decision };
+    });
+    const order = { inactivo: 0, en_riesgo: 1, al_dia: 2 };
+    items.sort((a, b) => order[a.status] - order[b.status] || b.daysSince - a.daysSince);
+    res.json({ today, counts: { inactivo: items.filter((i) => i.status === "inactivo").length, en_riesgo: items.filter((i) => i.status === "en_riesgo").length, al_dia: items.filter((i) => i.status === "al_dia").length }, items });
   }));
 
   // ----- Sedes y reglas -----
@@ -344,7 +432,7 @@ function createApp({
     const where = [];
     for (const word of text(req.query.q, "q", { max: 80 }).split(/\s+/).filter(Boolean).slice(0, 5)) {
       params.push(`%${word.replace(/[%_]/g, "")}%`);
-      where.push(`e.name ILIKE $${params.length}`);
+      where.push(`(e.name ILIKE $${params.length} OR e.name_es ILIKE $${params.length})`);
     }
     if (req.query.target) { params.push(String(req.query.target)); where.push(`e.target = $${params.length}`); }
     if (req.query.role) { params.push(String(req.query.role)); where.push(`e.role = $${params.length}`); }
@@ -362,11 +450,11 @@ function createApp({
     const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const { rows: total } = await db.query(`SELECT COUNT(*)::int AS n FROM exercises e JOIN equipment q ON q.id = e.equipment_id ${w}`, params);
     const { rows } = await db.query(
-      `SELECT e.id, e.name, e.target, e.role, e.movement_pattern AS pattern, e.level, e.enabled, e.classified_by,
+      `SELECT e.id, COALESCE(e.name_es, e.name) AS name, e.name AS name_en, e.target, e.role, e.movement_pattern AS pattern, e.level, e.enabled, e.classified_by,
               q.key AS equipment, q2.key AS extra, e.image_path
        FROM exercises e JOIN equipment q ON q.id = e.equipment_id
        LEFT JOIN equipment q2 ON q2.id = e.extra_equipment_id ${w}
-       ORDER BY e.name, e.id LIMIT ${size} OFFSET ${(page - 1) * size}`,
+       ORDER BY COALESCE(e.name_es, e.name), e.id LIMIT ${size} OFFSET ${(page - 1) * size}`,
       params
     );
     res.json({ total: total[0].n, page, pageSize: size, items: rows.map((r) => ({ ...r, targetLabel: targetLabel(r.target), equipmentLabel: equipmentInfo(r.equipment).label + (r.extra ? ` + ${equipmentInfo(r.extra).label}` : ""), needs: equipmentInfo(r.equipment).kind, imageUrl: `${mediaBase.replace(/\/$/, "")}/${r.image_path}` })) });
@@ -465,7 +553,7 @@ function createApp({
       [m.id]
     );
     res.json({
-      member: { id: m.id, nombre: m.nombre, sedeId: m.sede_id, sede: m.sede_nombre, active: m.active, level: m.level, daysPerWeek: m.days_per_week, focus: m.focus, notes: m.notes, gender: m.gender ?? null, priorities: m.priorities ?? null, sessionMinutes: m.session_minutes ?? null },
+      member: { id: m.id, nombre: m.nombre, sedeId: m.sede_id, sede: m.sede_nombre, active: m.active, level: m.level, daysPerWeek: m.days_per_week, focus: m.focus, notes: m.notes, gender: m.gender ?? null, priorities: m.priorities ?? null, sessionMinutes: m.session_minutes ?? null, limitations: areaLabels(m.limitations) },
       link: linkFor(req, m.access_token),
       view: await memberView(m),
       history,

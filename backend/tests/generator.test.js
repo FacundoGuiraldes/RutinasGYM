@@ -215,3 +215,40 @@ test("hipertrofia: todas las combinaciones con prioridades y duraciones son vál
   assert.equal(combos, 225);
   await db.close();
 });
+
+test("hipertrofia: los ejercicios en posición estirada aparecen más que en un enfoque general", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const byId = new Map(pool.map((e) => [e.id, e]));
+  const re = /incline (dumbbell |barbell |cable )?(press|curl|fly|flye)|romanian|stiff[- ]leg|overhead (triceps )?extension|pull-?over|\bfly\b|seated leg curl|lying leg curl|preacher curl|hack squat|bulgarian|split squat|front squat|calf raise/i;
+  const share = (focus) => {
+    let hit = 0, tot = 0;
+    for (let id = 1; id <= 40; id++) {
+      const r = generateRoutine({ pool, member: { id, level: 2, daysPerWeek: 4, focus, priorities: [], sessionMinutes: 60 }, cycleNumber: 1 });
+      for (const d of r.days) for (const x of d.exercises) { tot++; if (re.test(byId.get(x.exerciseId).name)) hit++; }
+    }
+    return hit / tot;
+  };
+  const h = share("hipertrofia"), g = share("general");
+  assert.ok(h > g, `hipertrofia ${h.toFixed(3)} > general ${g.toFixed(3)}`);
+  await db.close();
+});
+
+test("nombres en español: la mayoría se traduce, y lo traducido es legible", async () => {
+  const { translateName } = require("../src/namesEs");
+  assert.equal(translateName("dumbbell biceps curl").es, "Curl de bíceps con mancuernas");
+  assert.equal(translateName("barbell bench press").es, "Press de banco con barra");
+  assert.equal(translateName("lever seated crunch").es, "Abdominal sentado en máquina");
+  assert.equal(translateName("trap bar deadlift").es, "Peso muerto con barra hexagonal");
+  assert.equal(translateName("sphinx").complete, true);
+  assert.equal(translateName("zzzz qqqq").complete, false, "lo desconocido queda sin traducir");
+});
+
+test("nombres en español: se guardan al importar y la vista del socio los usa", { skip }, async () => {
+  const db = await createSeededDb();
+  const { rows } = await db.query("SELECT COUNT(*) FILTER (WHERE name_es IS NOT NULL)::int AS es, COUNT(*)::int AS n FROM exercises");
+  assert.ok(rows[0].es / rows[0].n > 0.6, `cobertura ${rows[0].es}/${rows[0].n}`);
+  const { rows: one } = await db.query("SELECT name, name_es FROM exercises WHERE name = 'dumbbell biceps curl'");
+  assert.equal(one[0].name_es, "Curl de bíceps con mancuernas");
+  await db.close();
+});

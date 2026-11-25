@@ -20,6 +20,15 @@ services:
         value: https://api.groq.com/openai/v1
       - key: AI_MODEL
         value: openai/gpt-oss-120b
+      # Respaldo opcional: si Groq falla o llega a su límite, se prueba Gemini (clave gratis en aistudio.google.com)
+      - key: AI_FALLBACK_API_KEY
+        sync: false
+      - key: AI_FALLBACK_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: AI_FALLBACK_MODEL
+        value: gemini-2.5-flash
+      - key: AI_DAILY_LIMIT      # tope de consultas a la IA por día (cuida el límite gratis)
+        value: "800"
       - key: TRUST_PROXY
         value: "1"
       - key: PUBLIC_URL          # la URL que te asigne Render (https://....onrender.com)

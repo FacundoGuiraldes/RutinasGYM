@@ -154,7 +154,7 @@
   }
 
   function choiceGroup(name, options, current, onPick, cols = false) {
-    const wrap = h("div", { class: "choices" + (cols ? " cols" : ""), role: "group", "aria-label": name });
+    const wrap = h("div", { class: "choices" + (cols ? " cols" : "") + (cols === "words" ? " words" : ""), role: "group", "aria-label": name });
     const buttons = options.map((o) => {
       const b = h("button", { type: "button", class: "choice", "aria-pressed": String(o.v === current.value) },
         h("b", { text: String(o.t ?? o.v) }), o.d ? h("span", { class: "muted small", text: o.d }) : null);
@@ -171,7 +171,7 @@
 
   // Elección múltiple con tope (para las zonas a priorizar). "Parejo" limpia la selección.
   function zonePicker(selected, onChange) {
-    const wrap = h("div", { class: "choices cols", role: "group", "aria-label": "Zonas a priorizar" });
+    const wrap = h("div", { class: "choices cols words", role: "group", "aria-label": "Zonas a priorizar" });
     const note = h("p", { class: "muted small", style: "margin-top:8px" });
     const buttons = [];
     const paint = () => {
@@ -221,7 +221,7 @@
       zoneBlock,
       h("div", { class: "q", text: "¿Cuál es tu género?" }),
       h("p", { class: "muted small", style: "margin-bottom:10px", text: "Solo lo usamos para sugerir qué zonas reforzar cuando no elegís ninguna. Podés cambiarlas igual." }),
-      choiceGroup("Género", GENDERS, sel.gender, check, true),
+      choiceGroup("Género", GENDERS, sel.gender, check, "words"),
       h("label", { for: "notes", text: "¿Alguna lesión o limitación? (opcional)" }), notes,
       go,
     ];
@@ -256,6 +256,8 @@
     const monthSegments = h("div", { class: "segments", role: "img", "aria-label": `${progress.cycle.done} de ${progress.cycle.planned} días completos este mes` },
       ...Array.from({ length: Math.min(progress.cycle.planned, 31) }, (_, i) => h("i", { class: i < progress.cycle.done ? "on" : "" })));
 
+    const deloadBanner = routine.deload ? h("div", { class: "notice", role: "note" }, h("b", { text: "Esta semana es de descarga" }), h("span", { class: "muted small", text: routine.deloadNote })) : null;
+
     const header = h("section", { class: "week" },
       h("h1", { text: `Hola, ${view.member.nombre}` }),
       metaRow(`Sede ${view.member.sede}`, `Mes ${routine.cycleNumber}`, `hasta el ${fmtDate(routine.endsOn)}`),
@@ -289,7 +291,29 @@
     });
 
     $app.removeAttribute("aria-busy");
-    $app.replaceChildren(header, ...days, h("footer", { class: "attr", text: view.attribution }));
+    $app.replaceChildren(header, deloadBanner, ...days, limitationsCard(view), h("footer", { class: "attr", text: view.attribution }));
+  }
+
+  // "¿Te duele algo?": el socio lo cuenta con sus palabras y la rutina se ajusta sola
+  function limitationsCard(view) {
+    const current = view.member.limitations ?? [];
+    const input = h("textarea", { id: "limit-text", maxlength: "500", placeholder: "Ej: me molesta la rodilla derecha al bajar escaleras. O: ya no me duele el hombro." });
+    const btn = h("button", { class: "ghost full", type: "button", text: "Avisar a mi profe y ajustar la rutina", style: "margin-top:10px" });
+    btn.addEventListener("click", async () => {
+      if (!input.value.trim()) return toast("Contanos qué te molesta", true);
+      setLoading(btn, true);
+      try {
+        const r = await api("POST", "/api/me/limitations", { text: input.value });
+        state = r.view;
+        toast(r.swapped.length ? `${r.reply} Cambiamos ${r.swapped.length} ejercicio${r.swapped.length === 1 ? "" : "s"}.` : r.reply);
+        render();
+      } catch (e) { toast(e.message, true); setLoading(btn, false); }
+    });
+    return h("section", { class: "card", style: "margin-top:16px" },
+      h("h3", { text: "¿Te duele algo?" }),
+      h("p", { class: "muted small", style: "margin:6px 0 10px", text: "Contalo con tus palabras. Sacamos de tu rutina los ejercicios que cargan esa zona. No reemplaza a un médico." }),
+      current.length ? h("div", { class: "chips", style: "margin-bottom:10px" }, ...current.map((a) => h("span", { class: "pill warn", text: a.label }))) : null,
+      input, btn);
   }
 
   function exerciseRow(day, e) {
@@ -428,6 +452,26 @@
       }
       renderMessage("No pudimos cargar tu rutina", err.message);
     }
+  }
+
+  // ---------- Instalar como app ----------
+  // Android/Chrome avisa con "beforeinstallprompt"; en iPhone hay que hacerlo a mano desde Safari.
+  let installEvent = null;
+  const dismissed = () => { try { return localStorage.getItem("installDismissed") === "1"; } catch { return false; } };
+  const standalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  function showInstallHint(text, action) {
+    if (standalone() || dismissed() || document.querySelector(".install")) return;
+    const close = h("button", { class: "ghost small", type: "button", text: "Ahora no", onclick: () => { try { localStorage.setItem("installDismissed", "1"); } catch { /* sin almacenamiento */ } bar.remove(); } });
+    const bar = h("div", { class: "install", role: "region", "aria-label": "Instalar la app" }, h("span", { text }), action, close);
+    document.body.append(bar);
+  }
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installEvent = e;
+    setTimeout(() => showInstallHint("Instalá la app para abrir tu rutina con un toque.", h("button", { class: "primary small", type: "button", text: "Instalar", onclick: async () => { await installEvent.prompt(); installEvent = null; document.querySelector(".install")?.remove(); } })), 4000);
+  });
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !standalone()) {
+    setTimeout(() => showInstallHint("Para tenerla como app: tocá Compartir y después “Agregar a inicio”."), 6000);
   }
 
   init();

@@ -36,7 +36,7 @@ function rankCandidates(pool, current, { effLevel, excludeIds = new Set() }) {
   // Se descartan los que no se parecen ni en patrón ni en rol, salvo que no haya nada mejor
   const strong = scored.filter((s) => s.ex.pattern === current.pattern || s.ex.role === current.role);
   const use = strong.length ? strong : scored;
-  return use.sort((a, b) => b.score - a.score || a.ex.name.localeCompare(b.ex.name));
+  return use.sort((a, b) => b.score - a.score || shown(a.ex).localeCompare(shown(b.ex)));
 }
 
 // Lista corta para la IA: los 5 mejores + hasta 3 con equipamiento distinto (para poder pedir "sin barra")
@@ -59,7 +59,7 @@ function shortlist(ranked, n = 8) {
 async function chooseWithAi(ai, { current, candidates, reason, level }) {
   const list = candidates.map((c) => ({
     id: c.ex.id,
-    nombre: c.ex.name,
+    nombre: shown(c.ex),
     equipamiento: c.ex.equipment,
     musculo: c.ex.target,
     secundarios: c.ex.secondary,
@@ -98,11 +98,14 @@ async function chooseWithAi(ai, { current, candidates, reason, level }) {
 
 // ---------- Reemplazo en la base ----------
 
+// Nombre para mostrar: en español si se pudo traducir
+const shown = (e) => e.name_es || e.nameEs || e.name;
+
 async function loadRoutineExercise(db, routineExerciseId) {
   const { rows } = await db.query(
     `SELECT re.id, re.day_id, re.exercise_id, d.routine_id, r.status, r.params, r.member_id,
-            m.sede_id, m.level, m.nombre AS member_name,
-            e.name, e.target, e.role, e.movement_pattern AS pattern, e.level AS ex_level,
+            m.sede_id, m.level, m.limitations, m.nombre AS member_name,
+            COALESCE(e.name_es, e.name) AS name, e.target, e.role, e.movement_pattern AS pattern, e.level AS ex_level,
             e.secondary_muscles, q.key AS equipment
      FROM routine_exercises re
      JOIN routine_days d ON d.id = re.day_id
@@ -138,7 +141,7 @@ async function replaceRoutineExercise(db, ai, { routineExerciseId, memberId = nu
     }
   }
 
-  const pool = await loadPool(db, row.sede_id);
+  const pool = await loadPool(db, row.sede_id, { limitations: row.limitations ?? [] });
   const { rows: used } = await db.query(
     `SELECT DISTINCT re.exercise_id FROM routine_exercises re JOIN routine_days d ON d.id = re.day_id WHERE d.routine_id = $1`,
     [row.routine_id]
@@ -194,14 +197,14 @@ async function replaceRoutineExercise(db, ai, { routineExerciseId, memberId = nu
     await t.query(
       `INSERT INTO change_logs (actor, member_id, sede_id, action, payload, needs_review)
        VALUES ($1, $2, $3, 'replace_exercise', $4::jsonb, $5)`,
-      [actor, row.member_id, row.sede_id, JSON.stringify({ routineExerciseId: row.id, from: current.id, fromName: current.name, to: chosen.id, toName: chosen.name, reason, explanation, aiUsed }), needsReview]
+      [actor, row.member_id, row.sede_id, JSON.stringify({ routineExerciseId: row.id, from: current.id, fromName: current.name, to: chosen.id, toName: shown(chosen), reason, explanation, aiUsed }), needsReview]
     );
   });
 
   return {
     routineExerciseId: row.id,
     from: { id: current.id, name: current.name },
-    to: { id: chosen.id, name: chosen.name, equipment: chosen.equipment, target: chosen.target },
+    to: { id: chosen.id, name: shown(chosen), equipment: chosen.equipment, target: chosen.target },
     explanation,
     aiUsed,
     needsReview,

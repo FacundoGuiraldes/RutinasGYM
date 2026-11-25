@@ -133,17 +133,53 @@
     const [ov, sd] = await Promise.all([api("GET", "/api/admin/overview"), api("GET", "/api/admin/sedes")]).catch(() => [null, null]);
     if (!ov) return;
     sedes = sd;
-    const tabs = [["socios", "Socios"], ["sedes", "Sedes"], ["catalogo", "Catálogo"], ["agente", "Agente IA"], ["revisar", `Revisar${ov.to_review ? ` (${ov.to_review})` : ""}`]];
+    const tabs = [["socios", "Socios"], ["seguimiento", "Seguimiento"], ["sedes", "Sedes"], ["catalogo", "Catálogo"], ["agente", "Agente IA"], ["revisar", `Revisar${ov.to_review ? ` (${ov.to_review})` : ""}`]];
     const nav = h("div", { class: "tabs", role: "tablist" }, ...tabs.map(([id, label]) => h("button", { role: "tab", "aria-selected": String(tab === id), text: label, onclick: () => { tab = id; boot(); } })));
     const head = h("div", { class: "topbar" },
       brand(),
       h("div", { class: "row wrap" }, h("span", { class: "pill", text: `${ov.members} socios` }), h("span", { class: "pill", text: `${ov.active_routines} rutinas activas` }), h("span", { class: "pill " + (ov.aiEnabled ? "ok" : "warn"), text: ov.aiEnabled ? "IA activa" : "IA apagada" }),
+        h("button", { class: "small ghost", text: "Descargar respaldo", onclick: downloadBackup }),
         h("button", { class: "small ghost", text: "Cerrar ciclos vencidos", onclick: () => attempt(async () => { const r = await api("POST", "/api/admin/cycles/run"); toast(`Ciclos procesados: ${r.results.length}`); boot(); }) }),
         h("button", { class: "small ghost", text: "Salir", onclick: () => { sessionStorage.removeItem("adminKey"); key = null; renderLogin(); } })));
     const body = h("div");
     $app.removeAttribute("aria-busy");
     $app.replaceChildren(head, nav, body);
-    ({ socios: viewMembers, sedes: viewSedes, catalogo: viewCatalog, agente: viewAgent, revisar: viewReview })[tab](body, ov);
+    ({ socios: viewMembers, seguimiento: viewFollowUp, sedes: viewSedes, catalogo: viewCatalog, agente: viewAgent, revisar: viewReview })[tab](body, ov);
+  }
+
+  // Respaldo: baja un JSON con todo lo que no se puede regenerar
+  async function downloadBackup() {
+    try {
+      const res = await fetch("/api/admin/backup", { headers: { Authorization: `Bearer ${key}` } });
+      if (!res.ok) throw new Error("No se pudo generar el respaldo");
+      const url = URL.createObjectURL(await res.blob());
+      const a = h("a", { href: url, download: `respaldo-rutinas-${new Date().toISOString().slice(0, 10)}.json` });
+      document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      toast("Respaldo descargado");
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- Seguimiento ----------
+
+  const STATUS = { inactivo: ["bad", "Sin venir"], en_riesgo: ["warn", "En riesgo"], al_dia: ["ok", "Al día"] };
+  const DECISION = { PROGRESS: "Progresó", MAINTAIN: "Se mantuvo", SIMPLIFY: "Se simplificó" };
+
+  async function viewFollowUp(root) {
+    root.replaceChildren(skeletonRows(4));
+    const d = await attempt(() => api("GET", "/api/admin/adherence"));
+    if (!d) return;
+    const summary = h("div", { class: "row wrap", style: "margin:12px 0" }, ...Object.entries(STATUS).map(([k, [cls, label]]) => h("span", { class: `pill ${cls}`, text: `${label}: ${d.counts[k]}` })));
+    if (!d.items.length) return root.replaceChildren(h("p", { class: "muted", text: "Todavía no hay socios con rutina activa para seguir." }));
+    root.replaceChildren(summary, h("div", { class: "card", style: "overflow-x:auto" }, h("table", {},
+      h("thead", {}, h("tr", {}, ...["Socio", "Sede", "Estado", "Último día completo", "Ritmo del mes", "Mes pasado", ""].map((t) => h("th", { text: t })))),
+      h("tbody", {}, ...d.items.map((m) => h("tr", {},
+        h("td", {}, h("b", { text: m.nombre })),
+        h("td", { text: m.sede }),
+        h("td", {}, h("span", { class: `pill ${STATUS[m.status][0]}`, text: STATUS[m.status][1] })),
+        h("td", { text: m.lastDone ? (m.daysSince === 0 ? "Hoy" : `hace ${m.daysSince} día${m.daysSince === 1 ? "" : "s"}`) : "Todavía ninguno" }),
+        h("td", { text: `${m.pacePct}% (${m.cycleDone} días completos)` }),
+        h("td", { text: DECISION[m.lastDecision] ?? "—" }),
+        h("td", {}, h("button", { class: "small", text: "Abrir", onclick: () => viewMember(root, m.id) }))))))));
   }
 
   // ---------- Socios ----------
@@ -198,9 +234,11 @@
   }
 
   function showLink(nombre, link) {
+    const wa = `https://wa.me/?text=${encodeURIComponent(`Hola ${nombre.split(" ")[0]}! Acá está tu rutina del gimnasio: ${link}`)}`;
     setTimeout(() => modal(`Link de ${nombre}`, [
       h("p", { class: "muted", text: "Mandáselo por WhatsApp. Es personal: quien lo tenga entra a esa rutina. Si se filtra, generá uno nuevo desde la ficha del socio." }),
       h("input", { value: link, readonly: true, onclick: (e) => e.target.select() }),
+      h("a", { class: "button", href: wa, target: "_blank", rel: "noopener noreferrer", text: "Enviar por WhatsApp" }),
     ], [{ text: "Cerrar" }, { text: "Copiar link", primary: true, run: async () => { try { await navigator.clipboard.writeText(link); toast("Link copiado"); } catch { toast("Copialo a mano: seleccioná el texto", true); return false; } } }]), 50);
   }
 
@@ -238,6 +276,7 @@
     root.replaceChildren(...[
       h("button", { class: "ghost", text: "← Volver", onclick: boot }),
       h("div", { class: "card" }, h("div", { class: "row spread wrap" }, h("h2", { style: "margin:0", text: m.nombre }), h("span", { class: "pill", text: `Sede ${m.sede}` })),
+        m.limitations?.length ? h("div", { class: "row wrap", style: "margin-top:8px" }, h("span", { class: "muted small", text: "Cuidar:" }), ...m.limitations.map((a) => h("span", { class: "pill warn", text: a.label }))) : null,
         h("div", { class: "row wrap", style: "margin-top:10px" },
           h("button", { class: "small", text: "Ver link", onclick: () => showLink(m.nombre, d.link) }),
           h("button", { class: "small", text: "Generar link nuevo", onclick: async () => { if (!confirm("El link anterior dejará de funcionar. ¿Seguro?")) return; const r = await attempt(() => api("POST", `/api/admin/members/${id}/rotate-token`)); if (r) showLink(m.nombre, r.link); } }),

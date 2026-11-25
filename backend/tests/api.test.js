@@ -541,3 +541,96 @@ test("perfil: género, duración y zonas se guardan en el onboarding y se valida
   assert.equal(d.member.gender, "hombre");
   await t.close();
 });
+
+test("semana de descarga: última semana del ciclo con la mitad de las series (intermedios cada ciclo, principiantes cada 8 semanas)", async () => {
+  const { isDeloadWeek } = require("../src/routines");
+  const d = (level, cycleNumber, today) => isDeloadWeek({ level, cycleNumber, startsOn: "2026-01-05", today });
+  assert.equal(d(2, 1, "2026-01-12"), false, "semana 2");
+  assert.equal(d(2, 1, "2026-01-26"), true, "semana 4 de un intermedio");
+  assert.equal(d(1, 1, "2026-01-26"), false, "principiante: ciclo 1 sin descarga");
+  assert.equal(d(1, 2, "2026-01-26"), true, "principiante: ciclo 2 con descarga");
+});
+
+test("lesiones: el socio lo cuenta, la rutina se ajusta y los reemplazos respetan la zona", { skip }, async () => {
+  const { isBlocked, interpretByWords } = require("../src/limitations");
+  assert.deepEqual(interpretByWords("me duele la rodilla y el hombro"), ["rodilla", "hombro"]);
+  assert.equal(isBlocked("barbell full squat", ["rodilla"]), true);
+  assert.equal(isBlocked("dumbbell biceps curl", ["rodilla"]), false);
+
+  const t = await setup();
+  const m = await t.createMember({ nombre: "Rodri", sedeId: 1 });
+  // Las notas del onboarding ya cuentan
+  const on = await t.call("POST", "/api/me/onboarding", { token: m.token, body: { level: 2, daysPerWeek: 4, focus: "general", notes: "Operación de rodilla hace un año" } });
+  assert.equal(on.status, 201);
+  assert.deepEqual(on.json.member.limitations.map((l) => l.key), ["rodilla"]);
+  const names = (v) => ALL_EX(v).map((x) => x.exercise.name.toLowerCase());
+  const { rows } = await t.db.query("SELECT name FROM exercises e JOIN routine_exercises re ON re.exercise_id = e.id JOIN routine_days d ON d.id = re.day_id JOIN routines r ON r.id = d.routine_id WHERE r.member_id = $1", [m.id]);
+  assert.ok(!rows.some((r) => /squat|lunge|jump|leg extension/i.test(r.name)), "nada que cargue la rodilla");
+
+  // Después suma otra zona con sus palabras (sin IA: por reglas) y se ajusta la rutina activa
+  const r2 = await t.call("POST", "/api/me/limitations", { token: m.token, body: { text: "También me molesta el hombro" } });
+  assert.equal(r2.status, 200, JSON.stringify(r2.json));
+  assert.deepEqual(r2.json.areas.map((a) => a.key).sort(), ["hombro", "rodilla"]);
+  const { rows: after } = await t.db.query("SELECT e.name FROM exercises e JOIN routine_exercises re ON re.exercise_id = e.id JOIN routine_days d ON d.id = re.day_id JOIN routines r ON r.id = d.routine_id WHERE r.member_id = $1 AND r.status = 'ACTIVE'", [m.id]);
+  assert.ok(!after.some((r) => isBlocked(r.name, ["hombro", "rodilla"])), "la rutina activa no tiene nada de esas zonas");
+  assert.ok(names(r2.json.view).length > 0);
+  assert.equal((await t.call("POST", "/api/me/limitations", { token: m.token, body: { text: "" } })).status, 400);
+  await t.close();
+});
+
+test("lesiones: 'ya no me duele' saca la zona y sigue sin ensuciar el resto", async () => {
+  const { interpretLimitations } = require("../src/limitations");
+  const noAi = { enabled: false };
+  assert.deepEqual((await interpretLimitations(noAi, "ya no me duele la rodilla", ["rodilla", "hombro"])).areas, ["hombro"]);
+  assert.deepEqual((await interpretLimitations(noAi, "hoy entrené piernas", ["rodilla"])).areas, ["rodilla"]);
+});
+
+test("seguimiento: ordena primero a quien dejó de venir y marca al día a quien entrena", { skip }, async () => {
+  const t = await setup();
+  const a = await t.createMember({ nombre: "Activa", sedeId: 1, level: 2, daysPerWeek: 3, focus: "general" });
+  const b = await t.createMember({ nombre: "Ausente", sedeId: 1, level: 2, daysPerWeek: 3, focus: "general" });
+  // La ausente empezó hace 3 semanas y nunca completó un día
+  await t.db.query("UPDATE routines SET starts_on = (now() - interval '21 days')::date, ends_on = (now() + interval '7 days')::date WHERE member_id = $1", [b.id]);
+  const va = (await t.call("GET", "/api/me", { token: a.token })).json;
+  const dayId = va.routine.days[0].id;
+  assert.equal((await t.call("POST", `/api/me/days/${dayId}/complete`, { token: a.token })).status, 200);
+  const r = await t.adminApi("GET", "/api/admin/adherence");
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.items[0].nombre, "Ausente");
+  assert.equal(r.json.items[0].status, "inactivo");
+  assert.equal(r.json.items.find((i) => i.nombre === "Activa").status, "al_dia");
+  await t.close();
+});
+
+test("IA: respaldo cuando falla el proveedor principal y tope diario", async () => {
+  const mk = (handler, extra = {}) => createAi({ apiKey: "a", baseUrl: "http://principal", fallback: { apiKey: "b", model: "m2", baseUrl: "http://respaldo" }, fetchImpl: handler, ...extra });
+  const ok = (url) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: `desde ${url}` } }] }), text: async () => "" });
+  const fail = { ok: false, status: 429, json: async () => ({}), text: async () => "límite" };
+
+  const ai1 = mk(async (url) => (url.startsWith("http://principal") ? fail : ok(url)));
+  assert.match((await ai1.chat({ messages: [] })).content, /respaldo/);
+  assert.equal(ai1.usage().fallbackCount, 1);
+
+  const ai2 = mk(async (url) => ok(url));
+  assert.match((await ai2.chat({ messages: [] })).content, /principal/);
+
+  const ai3 = createAi({ apiKey: "a", baseUrl: "http://x", fallback: null, dailyLimit: 2, fetchImpl: async (u) => ok(u) });
+  await ai3.chat({ messages: [] });
+  await ai3.chat({ messages: [] });
+  await assert.rejects(() => ai3.chat({ messages: [] }), (e) => e.code === "AI_BUDGET");
+  // Sin respaldo, el error del proveedor sube tal cual
+  const ai4 = createAi({ apiKey: "a", baseUrl: "http://x", fallback: null, fetchImpl: async () => fail });
+  await assert.rejects(() => ai4.chat({ messages: [] }), (e) => e.code === "AI_ERROR");
+});
+
+test("respaldo: descarga todo lo que no se puede regenerar y exige clave", { skip }, async () => {
+  const t = await setup();
+  await t.createMember({ nombre: "Para respaldo", sedeId: 1 });
+  assert.equal((await t.call("GET", "/api/admin/backup")).status, 401);
+  const r = await t.adminApi("GET", "/api/admin/backup");
+  assert.equal(r.status, 200);
+  assert.ok(r.json.tables.members.some((m) => m.nombre === "Para respaldo"));
+  assert.ok(r.json.tables.sedes.length === 2 && r.json.tables.sede_equipment.length > 10);
+  assert.ok(!("exercises" in r.json.tables), "el catálogo se reimporta solo");
+  await t.close();
+});

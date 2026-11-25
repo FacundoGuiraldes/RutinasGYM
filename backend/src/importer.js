@@ -2,6 +2,7 @@
 // y NO pisa lo que corregiste vos (classified_by = 'admin', enabled, equipamiento por sede,
 // exclusiones). Sirve igual para PGlite (tests) que para Postgres real.
 
+const { translateName } = require("./namesEs");
 const { classifyExercise } = require("./classify");
 const { effectiveEquipment, effectiveExtra } = require("./equipment");
 
@@ -16,6 +17,7 @@ function toRow(raw, equipmentIdByKey) {
   return {
     id: String(raw.id),
     name: raw.name,
+    name_es: (() => { const t = translateName(raw.name); return t.complete ? t.es : null; })(),
     body_part: raw.body_part,
     target: raw.target,
     muscle_group: raw.muscle_group ?? null,
@@ -75,18 +77,18 @@ async function importCatalog(db, records, { sedes = SEDES, log = () => {} } = {}
   for (let i = 0; i < rows.length; i += BATCH) {
     const lote = rows.slice(i, i + BATCH);
     await db.query(
-      `INSERT INTO exercises (id, name, body_part, target, muscle_group, secondary_muscles, equipment_id, extra_equipment_id,
+      `INSERT INTO exercises (id, name, name_es, body_part, target, muscle_group, secondary_muscles, equipment_id, extra_equipment_id,
                               steps_es, steps_en, image_path, gif_path, attribution, media_id,
                               role, movement_pattern, level)
-       SELECT x.id, x.name, x.body_part, x.target, x.muscle_group, x.secondary_muscles, x.equipment_id, x.extra_equipment_id,
+       SELECT x.id, x.name, x.name_es, x.body_part, x.target, x.muscle_group, x.secondary_muscles, x.equipment_id, x.extra_equipment_id,
               x.steps_es, x.steps_en, x.image_path, x.gif_path, x.attribution, x.media_id,
               x.role, x.movement_pattern, x.level
        FROM jsonb_to_recordset($1::jsonb) AS x(
-         id text, name text, body_part text, target text, muscle_group text, secondary_muscles jsonb,
+         id text, name text, name_es text, body_part text, target text, muscle_group text, secondary_muscles jsonb,
          equipment_id int, extra_equipment_id int, steps_es jsonb, steps_en jsonb, image_path text, gif_path text,
          attribution text, media_id text, role text, movement_pattern text, level int)
        ON CONFLICT (id) DO UPDATE SET
-         name = EXCLUDED.name, body_part = EXCLUDED.body_part, target = EXCLUDED.target,
+         name = EXCLUDED.name, name_es = EXCLUDED.name_es, body_part = EXCLUDED.body_part, target = EXCLUDED.target,
          muscle_group = EXCLUDED.muscle_group, secondary_muscles = EXCLUDED.secondary_muscles,
          equipment_id = EXCLUDED.equipment_id, extra_equipment_id = EXCLUDED.extra_equipment_id, steps_es = EXCLUDED.steps_es, steps_en = EXCLUDED.steps_en,
          image_path = EXCLUDED.image_path, gif_path = EXCLUDED.gif_path,

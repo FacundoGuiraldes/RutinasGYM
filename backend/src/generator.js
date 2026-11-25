@@ -3,6 +3,7 @@
 // así que es imposible que el generador devuelva algo que la sede no puede hacer.
 
 const { mulberry32, hashString, weightedPick } = require("./util");
+const { isBlocked } = require("./limitations");
 
 const USABLE_ROLES = new Set(["compound", "isolation", "core", "cardio"]);
 
@@ -207,9 +208,14 @@ function schemeFor(ex, { focus, level, prog, isPriority = false, first = false }
 
 // ---------- Selección ----------
 
+// Ejercicios que cargan el músculo en posición estirada (long muscle length). La evidencia reciente
+// los favorece para hipertrofia, así que en ese enfoque pesan más al sortear entre candidatos.
+const LENGTHENED = /incline (dumbbell |barbell |cable )?(press|curl|fly|flye)|romanian|stiff[- ]leg|good morning|overhead (triceps )?extension|french press|skull ?crusher|pull-?over|\bfly\b|\bflye\b|seated leg curl|lying leg curl|preacher curl|hack squat|bulgarian|split squat|front squat|full squat|cable crossover|\bdip\b|calf raise/i;
+const lengthenedBoost = (e, focus) => (focus === "hipertrofia" && LENGTHENED.test(e.name) ? 1.8 : 1);
+
 // Candidatos para un slot, relajando criterios de a poco si no hay ninguno:
 // 1) rol + patrón exactos, 2) solo rol, 3) cualquier ejercicio usable del músculo.
-function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng }) {
+function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng, focus }) {
   const base = pool.filter((e) => USABLE_ROLES.has(e.role) && e.level <= effLevel && slot.targets.includes(e.target));
   const tiers = [
     (e) => (!slot.roles || slot.roles.includes(e.role)) && (!slot.patterns || slot.patterns.includes(e.pattern)),
@@ -223,7 +229,7 @@ function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng 
     const list = fresh.length ? fresh : cands;
     return weightedPick(
       list,
-      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1),
+      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * lengthenedBoost(e, focus),
       rng
     );
   }
@@ -275,7 +281,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
 
     const dayUsed = new Set();
     const exercises = [];
-    const ctx = { effLevel, dayUsed, routineUsed, prevIds, rng };
+    const ctx = { effLevel, dayUsed, routineUsed, prevIds, rng, focus };
     const fill = (slotName) => {
       const ex = pickForSlot(pool, SLOTS[slotName], ctx);
       if (!ex) return false;
@@ -305,9 +311,9 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
 }
 
 // Ejercicios usables de la sede: habilitados, con equipamiento disponible y sin exclusión de la sede
-async function loadPool(db, sedeId) {
+async function loadPool(db, sedeId, { limitations = [] } = {}) {
   const { rows } = await db.query(
-    `SELECT e.id, e.name, e.body_part, e.target, e.secondary_muscles, e.role,
+    `SELECT e.id, e.name, e.name_es, e.body_part, e.target, e.secondary_muscles, e.role,
             e.movement_pattern AS pattern, e.level, q.key AS equipment
      FROM exercises e
      JOIN equipment q ON q.id = e.equipment_id
@@ -319,7 +325,8 @@ async function loadPool(db, sedeId) {
        AND NOT EXISTS (SELECT 1 FROM sede_exclusions x WHERE x.sede_id = $1 AND x.exercise_id = e.id)`,
     [sedeId]
   );
-  return rows.map((r) => ({ ...r, secondary: r.secondary_muscles ?? [] }));
+  const ok = rows.filter((r) => !isBlocked(r.name, limitations));
+  return ok.map((r) => ({ ...r, secondary: r.secondary_muscles ?? [] }));
 }
 
 module.exports = {

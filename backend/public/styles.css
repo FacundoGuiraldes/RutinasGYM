@@ -253,3 +253,12 @@ input[type=checkbox]:not(.check) { width: 22px; height: 22px; min-height: 0; fle
   .building .plate { animation: none; opacity: 1; }
 }
 [hidden]{display:none!important}
+.notice{display:flex;flex-direction:column;gap:2px;margin:14px 0;padding:12px 14px;border-radius:10px;border-left:4px solid var(--p3);background:color-mix(in srgb,var(--p3) 14%,var(--surface,#fff))}
+a.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:10px;font-weight:600;text-decoration:none;background:var(--p4);color:#fff;margin-top:10px}
+a.button:focus-visible{outline:3px solid currentColor;outline-offset:2px}
+.install{position:fixed;left:12px;right:12px;bottom:12px;z-index:20;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border-radius:12px;background:var(--ink,#121719);color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.28)}
+.install span{flex:1 1 200px;font-size:.95rem}
+.install .ghost{color:#fff;border-color:rgba(255,255,255,.4)}
+/* Opciones con texto (zonas, género): letra normal, no el número grande */
+.choices.cols.words{grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}
+.choices.cols.words button.choice b{font-family:inherit;font-weight:700;font-size:1rem;line-height:1.2}

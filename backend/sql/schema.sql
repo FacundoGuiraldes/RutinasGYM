@@ -166,3 +166,6 @@ CREATE INDEX IF NOT EXISTS exercises_extra_equipment_idx ON exercises (extra_equ
 ALTER TABLE members ADD COLUMN IF NOT EXISTS gender TEXT;                         -- mujer | hombre | otro
 ALTER TABLE members ADD COLUMN IF NOT EXISTS priorities JSONB;                    -- zonas a priorizar en hipertrofia; NULL = no se preguntó, [] = parejo
 ALTER TABLE members ADD COLUMN IF NOT EXISTS session_minutes INT;                 -- 45 | 60 | 75
+
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS name_es TEXT;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS limitations JSONB NOT NULL DEFAULT '[]'::jsonb;
