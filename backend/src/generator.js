@@ -33,7 +33,7 @@ const SLOTS = {
   hingeC: { targets: ["hamstrings", "glutes", "spine"], roles: ["compound"], patterns: ["hinge"] },
   legCurl: { targets: ["hamstrings"], roles: ["isolation"], patterns: ["knee_flexion"] },
   legExt: { targets: ["quads"], roles: ["isolation"], patterns: ["knee_extension"] },
-  gluteI: { targets: ["glutes"], roles: ["isolation", "compound"], patterns: ["glute_isolation", "hinge"] },
+  gluteI: { targets: ["glutes", "abductors"], roles: ["isolation", "compound"], patterns: ["glute_isolation", "hinge", "hip_abduction"] },
   calf: { targets: ["calves"], roles: ["isolation", "compound"] },
   abs: { targets: ["abs"], roles: ["core"] },
   cardio: { targets: ["cardiovascular system"], roles: ["cardio"] },
@@ -262,6 +262,7 @@ const lengthenedBoost = (e, focus) => (focus === "hipertrofia" && LENGTHENED.tes
 
 // Candidatos para un slot, relajando criterios de a poco si no hay ninguno:
 // 1) rol + patrón exactos, 2) solo rol, 3) cualquier ejercicio usable del músculo.
+const BEGINNER_AVOID = /barbell (deadlift|good morning|front squat|stiff leg deadlift|straight leg deadlift)|trap bar deadlift|\b(pull-up|chin-up)\b|chest dip|barbell (rear )?lunge|barbell step-up|barbell standing military press/i;
 const DUP_FAMILIES = new Set(["pushdown", "lateral", "flatpress", "inclinepress", "vpull"]);
 function pickForSlot(pool, slot, ctx0) {
   const { effLevel, dayUsed, routineUsed, prevIds, rng, focus, minQ = 0, dayFamilies = new Set() } = ctx0;
@@ -292,6 +293,11 @@ function pickForSlot(pool, slot, ctx0) {
       } else if (minQ > 0 && base.some((e) => canonRank(slot.canon, e.name) !== Infinity)) {
         continue; // para sumar ejercicios de relleno: si los clásicos ya se usaron hoy, mejor no sumar que meter una rareza
       }
+    }
+    // Quien recién empieza (menos de 6 meses): se evita lo más técnico y lo que más se lesiona si la técnica falla; se vuelve a eso cuando no queda otra
+    if (effLevel === 1) {
+      const easy = cands.filter((e) => !BEGINNER_AVOID.test(e.name));
+      if (easy.length) cands = easy;
     }
     // Preferencia firme por los de toda la vida: lo demás solo entra si no queda ninguno de esos
     const proven = cands.filter((e) => e.role === "cardio" || staple(e.name) <= 2);

@@ -66,8 +66,8 @@ const CANON = {
   ],
   legExt: [[/^lever leg extension$/, /^lever seated leg extension$/]],
   gluteI: [
-    [/^barbell glute bridge$/, /^barbell hip thrust$/, /^lever hip thrust$/, /^smith hip thrust$/, /^dumbbell glute bridge$/],
-    [/^cable pull through$/, /^cable (standing )?kickback/, /^lever (standing )?hip extension$/, /^cable hip extension/, /^dumbbell romanian deadlift$/, /^glute bridge$/],
+    [/^barbell glute bridge$/, /^barbell hip thrust$/, /^lever hip thrust$/, /^smith hip thrust$/, /^dumbbell glute bridge$/, /^cable pull through/],
+    [/^lever reverse hyperextension$/, /^lever seated hip abduction$/, /^dumbbell step-up$/, /^dumbbell sumo pull through$/, /^dumbbell romanian deadlift$/],
   ],
   calf: [
     [/^lever (standing )?calf raise$/, /^lever seated calf raise$/, /^barbell standing calf raise$/, /^dumbbell standing calf raise$/, /^smith standing calf raise$/, /^smith standing leg calf raise$/],

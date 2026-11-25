@@ -22,6 +22,7 @@ const CONTRIB = {
   knee_flexion: { isquios: 1 },
   knee_extension: { cuadriceps: 1 },
   glute_isolation: { gluteos: 1 },
+  hip_abduction: { gluteos: 0.5 },
   shoulder_raise: { hombros: 1 },
   rear_delt: { hombros: 1 },
 };
