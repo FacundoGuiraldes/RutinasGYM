@@ -258,7 +258,7 @@
         h("img", { class: "ex-thumb", src: e.exercise.imageUrl, alt: "", loading: "lazy", style: "width:56px;height:56px" }),
         h("div", { class: "grow" },
           h("div", { class: "ex-name", text: e.exercise.name }),
-          h("div", { class: "ex-meta", text: `${e.sets} × ${e.reps} · ${cap(e.exercise.target)} · ${e.exercise.equipmentLabel || e.exercise.equipment}${e.replaced ? " · cambiado" : ""}` }),
+          h("div", { class: "ex-meta", text: `${e.sets} × ${e.reps} · ${e.exercise.targetLabel ?? cap(e.exercise.target)} · ${e.exercise.equipmentLabel || e.exercise.equipment}${e.replaced ? " · cambiado" : ""}` }),
           h("div", { class: "ex-actions" },
             h("button", { class: "small", text: "Cambiar", onclick: rep(e) }),
             h("button", { class: "small danger", text: "No hay en la sede", onclick: rep(e, { exclude: true }) }))));

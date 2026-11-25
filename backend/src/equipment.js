@@ -163,6 +163,8 @@ const TARGET_ES = {
   "upper back": "Espalda alta", biceps: "Bíceps", delts: "Hombros", forearms: "Antebrazos", traps: "Trapecios",
   "serratus anterior": "Serrato", abductors: "Abductores", "levator scapulae": "Elevador de la escápula",
 };
-const targetLabel = (t) => TARGET_ES[t] ?? t;
+// El dataset marca "glúteos" como músculo de sentadillas, zancadas y peso muerto; al socio le decimos el músculo principal del movimiento.
+const PATTERN_LABEL = { squat: "Cuádriceps y glúteos", lunge: "Cuádriceps y glúteos", hinge: "Femorales y glúteos", hip_abduction: "Abductores (glúteo medio)" };
+const targetLabel = (t, pattern) => PATTERN_LABEL[pattern] ?? TARGET_ES[t] ?? t;
 
 module.exports = { TARGET_ES, targetLabel, EQUIPMENT, KIND_LABEL, effectiveEquipment, effectiveExtra, equipmentInfo, equipmentWeight };

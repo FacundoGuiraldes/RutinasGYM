@@ -382,3 +382,15 @@ test("volumen semanal: sin prioridades, ningún músculo grande queda por debajo
   }
   await db.close();
 });
+
+test("prioridad brazos: el tríceps aparece en la semana aunque el tiempo obligue a recortar", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  for (const days of [3, 4, 5]) for (const mins of [45, 60]) {
+    const r = generateRoutine({ pool, member: { id: 7, level: 2, daysPerWeek: days, focus: "hipertrofia", priorities: ["pecho", "brazos"], sessionMinutes: mins, gender: "hombre" }, cycleNumber: 1 });
+    const n = r.days.flatMap((d) => d.exercises).filter((x) => by.get(x.exerciseId).target === "triceps").length;
+    assert.ok(n >= 1, `${days}d ${mins}m: sin tríceps en la semana`);
+  }
+  await db.close();
+});

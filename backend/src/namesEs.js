@@ -29,6 +29,7 @@ const MOD = [
 
 // Movimientos (el sustantivo principal). Primero las frases más largas.
 const MOVE = [
+  ["hip abduction", "Abducción de cadera"], ["hip adduction", "Aducción de cadera"],
   ["bench press", "Press de banco"], ["chest press", "Press de pecho"], ["shoulder press", "Press de hombros"], ["military press", "Press militar"], ["leg press", "Prensa de piernas"],
   ["push-up", "Flexión de brazos"], ["push up", "Flexión de brazos"], ["pull-up", "Dominada"], ["pull up", "Dominada"], ["chin-up", "Dominada supina"], ["chin up", "Dominada supina"],
   ["sit-up", "Abdominal completo"], ["sit up", "Abdominal completo"], ["leg raise", "Elevación de piernas"], ["knee raise", "Elevación de rodillas"], ["lateral raise", "Elevación lateral"],

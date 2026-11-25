@@ -3,6 +3,7 @@
 const { generateRoutine, loadPool, DEFAULT_PROG, estimateMinutes } = require("./generator");
 const { areaLabels } = require("./limitations");
 const { equipmentInfo, targetLabel } = require("./equipment");
+const { translateName } = require("./namesEs");
 const { localDate, addDays, weekStart } = require("./util");
 const { AppError } = require("./errors");
 
@@ -120,7 +121,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
   );
   const { rows: exs } = await db.query(
     `SELECT re.id, re.day_id, re.position, re.sets, re.reps, re.rest_sec, re.note, re.replaced_from_id,
-            e.id AS exercise_id, COALESCE(e.name_es, e.name) AS name, e.target, e.secondary_muscles, e.gif_path, e.image_path,
+            e.id AS exercise_id, e.name_es, e.name AS name_en, e.target, e.movement_pattern AS pattern, e.secondary_muscles, e.gif_path, e.image_path,
             e.steps_es, e.attribution, q.key AS equipment
      FROM routine_exercises re
      JOIN routine_days d ON d.id = re.day_id
@@ -185,9 +186,9 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
             done: doneToday.has(x.id),
             exercise: {
               id: x.exercise_id,
-              name: x.name,
+              name: x.name_es ?? (() => { const t = translateName(x.name_en); return t.complete ? t.es : x.name_en; })(), // si no estaba traducido en la base, se traduce al mostrar
               target: x.target,
-              targetLabel: targetLabel(x.target),
+              targetLabel: targetLabel(x.target, x.pattern),
               equipment: x.equipment,
               equipmentLabel: equipmentInfo(x.equipment).label,
               secondary: x.secondary_muscles ?? [],

@@ -451,7 +451,9 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
         let idx = -1;
         for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 2) idx = k;
         // un músculo que está solo una vez (ej.: el tríceps en un día de empuje) no se saca: antes se acepta pasarse unos minutos
-        if (idx === -1) { const last = exercises.length - 1; if (timesOf(tgt(exercises[last])) > 1 || exercises.length > floor + 2) idx = last; else break; }
+        // Último recurso: se saca lo último del día, pero de un músculo que tenga más de un ejercicio (nunca el único: así el tríceps no desaparece de la semana)
+        if (idx === -1) for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (timesOf(tgt(exercises[k])) > 1) idx = k;
+        if (idx === -1) break;
         dropAt(idx);
       }
       exercises.forEach((x, k) => { x.position = k + 1; });
