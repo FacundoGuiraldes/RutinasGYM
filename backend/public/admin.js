@@ -263,8 +263,14 @@
             h("button", { class: "small", text: "Cambiar", onclick: rep(e) }),
             h("button", { class: "small danger", text: "No hay en la sede", onclick: rep(e, { exclude: true }) }))));
     const dayCard = (day) => h("div", { class: "card" }, h("h3", { text: day.estMinutes ? `${day.label} (unos ${day.estMinutes} min)` : day.label }), ...day.exercises.map(exerciseRow));
+    // Control de calidad automático de la rutina (src/quality.js)
+    const qa = d.view.routine?.quality;
+    const qaBox = qa && h("div", { class: qa.ok ? "card" : "card danger" },
+      h("strong", { text: qa.ok ? `Control de calidad: aprobada (${qa.score}/100)` : `Control de calidad: revisar a mano (${qa.score}/100)` }),
+      ...(qa.blockers ?? []).map((m) => h("div", { class: "muted small", text: `• ${m}` })),
+      ...(qa.ok ? (qa.warnings ?? []).slice(0, 3).map((m) => h("div", { class: "muted small", text: `· ${m}` })) : []));
     const days = d.view.routine
-      ? d.view.routine.days.map(dayCard)
+      ? [qaBox, ...d.view.routine.days.map(dayCard)].filter(Boolean)
       : [h("p", { class: "muted", text: "Todavía no armó su rutina (tiene que elegir nivel, días y enfoque desde su link)." })];
 
     const level = select([{ v: 1, t: "Principiante" }, { v: 2, t: "Intermedio" }, { v: 3, t: "Avanzado" }], m.level ?? 1);

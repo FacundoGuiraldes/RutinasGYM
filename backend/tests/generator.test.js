@@ -394,3 +394,40 @@ test("prioridad brazos: el tríceps aparece en la semana aunque el tiempo obligu
   }
   await db.close();
 });
+
+// ---------- Control de calidad: ninguna rutina generada se publica con fallas bloqueantes ----------
+const { evaluateRoutine } = require("../src/quality");
+
+test("quality: el evaluador detecta una rutina mala (sin tríceps con brazos prioritario, curl de primero, sin tirón)", () => {
+  const mk = (id, role, pattern, target, name) => [id, { id, role, pattern, target, name }];
+  const poolById = new Map([
+    mk(1, "isolation", "elbow_flexion", "biceps", "dumbbell curl"),
+    mk(2, "compound", "horizontal_push", "pectorals", "barbell bench press"),
+    mk(3, "compound", "horizontal_push", "pectorals", "dumbbell bench press"),
+    mk(4, "isolation", "elbow_flexion", "biceps", "cable curl"),
+  ]);
+  const days = [{ label: "Día 1", estMinutes: 20, exercises: [1, 2, 3, 4].map((id) => ({ exerciseId: id, sets: 3, reps: "8-12", restSec: 60 })) }];
+  const q = evaluateRoutine({ days, poolById, member: { daysPerWeek: 1 }, params: { focus: "hipertrofia", sessionMinutes: 60, priorities: ["brazos"] } });
+  assert.equal(q.ok, false);
+  const codes = q.blockers.map((b) => b.code);
+  for (const c of ["PRIMERO_NO_PRINCIPAL", "TIEMPO", "SIN_DIRECTO", "EMPUJE_TIRON"]) assert.ok(codes.includes(c), `debería detectar ${c}: ${codes}`);
+});
+
+test("quality: ningún perfil típico sale con fallas bloqueantes (nivel, días, enfoque, minutos, prioridades)", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  const PR = [[], ["pecho", "brazos"], ["gluteos", "piernas"], ["espalda", "hombros"], undefined];
+  let n = 0;
+  const fails = [];
+  for (const level of [1, 2, 3]) for (const days of [2, 3, 4, 5, 6]) for (const focus of ["hipertrofia", "general", "bajar_grasa", "fuerza"])
+    for (const mins of [45, 60, 75]) for (const pr of focus === "hipertrofia" ? PR : [undefined]) {
+      const member = { id: ++n, level, daysPerWeek: days, focus, priorities: pr, sessionMinutes: mins, gender: n % 2 ? "hombre" : "mujer" };
+      const r = generateRoutine({ pool, member, cycleNumber: 1 });
+      const q = evaluateRoutine({ days: r.days, poolById: by, member, params: r.params });
+      if (!q.ok) fails.push(`N${level} ${days}d ${focus} ${mins}m ${JSON.stringify(pr)}: ${q.blockers.map((b) => b.msg).join(" | ")}`);
+      assert.equal(r.quality.ok, q.ok, "generateRoutine debe informar el mismo resultado que el evaluador");
+    }
+  await db.close();
+  assert.equal(fails.length, 0, `${fails.length} rutinas con fallas:\n${fails.slice(0, 5).join("\n")}`);
+});

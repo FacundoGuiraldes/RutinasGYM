@@ -7,6 +7,7 @@ const { isBlocked } = require("./limitations");
 const { staple, isJunk } = require("./staples");
 const { canonRank } = require("./canon");
 const { weeklyVolume, rangeFor, contributions, ZONE_REGIONS, REGIONS } = require("./volume");
+const { evaluateRoutine, qualityCost, isMain } = require("./quality");
 
 const USABLE_ROLES = new Set(["compound", "isolation", "core", "cardio"]);
 
@@ -121,6 +122,7 @@ function ensureFrequency(daySlots, priorities) {
   }
 }
 
+const MAIN_LEADS = new Set(["chestC", "backV", "delC", "quadC", "hingeC", "lunge"]);
 // En cada día que entrena la zona: su ejercicio principal va primero y se suman ejercicios de volumen.
 function applyPriorities(names, priorities, level) {
   let out = [...names];
@@ -130,7 +132,7 @@ function applyPriorities(names, priorities, level) {
     const zone = ZONES[z];
     if (!out.some((n) => zone.slots.includes(n))) continue;
     const li = out.indexOf(zone.lead);
-    if (li > 0) { out.splice(li, 1); out.unshift(zone.lead); }
+    if (li > 0 && MAIN_LEADS.has(zone.lead)) { out.splice(li, 1); out.unshift(zone.lead); } // un curl o una extensión no abren el día: primero va un principal
     let last = -1;
     out.forEach((n, i) => { if (zone.slots.includes(n)) last = i; });
     out.splice(last + 1, 0, ...zone.extra.slice(0, extras));
@@ -355,7 +357,7 @@ function balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes
  * @param prog        estado de progresión { setsBonus, extraPerDay, levelBoost, loadStep }
  * @param prevIds     Set con los ejercicios del ciclo anterior (se evita repetirlos)
  */
-function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = new Set() }) {
+function generateOnce({ pool, member, cycleNumber = 1, prog = {}, prevIds = new Set(), attempt = 0 }) {
   const p = { ...DEFAULT_PROG, ...prog };
   const focus = FOCUSES.includes(member.focus) ? member.focus : "general";
   const split = splitFor({ daysPerWeek: member.daysPerWeek, focus, level: member.level });
@@ -364,7 +366,7 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
   const sessionMinutes = SESSION_MINUTES.includes(Number(member.sessionMinutes)) ? Number(member.sessionMinutes) : 60;
 
   const effLevel = Math.min(3, member.level + p.levelBoost);
-  const rng = mulberry32(hashString(`${member.id}:${cycleNumber}`));
+  const rng = mulberry32(hashString(attempt ? `${member.id}:${cycleNumber}:${attempt}` : `${member.id}:${cycleNumber}`));
   const routineUsed = new Set();
   const poolById = new Map(pool.map((e) => [e.id, e]));
   const warnings = [];
@@ -470,11 +472,85 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
   balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek: member.daysPerWeek });
   days.forEach((d) => { d.estMinutes = estimateMinutes(d.exercises); });
 
-  return {
-    days,
-    warnings,
-    params: { level: member.level, daysPerWeek: member.daysPerWeek, focus, effLevel, cycleNumber, prog: p, sessionMinutes, priorities, prioritiesSource, gender: member.gender ?? null },
-  };
+  const params = { level: member.level, daysPerWeek: member.daysPerWeek, focus, effLevel, cycleNumber, prog: p, sessionMinutes, priorities, prioritiesSource, gender: member.gender ?? null };
+
+  // ---------- Reparación guiada por el evaluador ----------
+  // Si la rutina tiene fallas bloqueantes (ver quality.js), se prueban movimientos chicos (una serie más o menos, sacar un
+  // ejercicio, sumar uno) y se aplica el que más baja el costo; así hasta que no quede ninguna falla o no haya mejora.
+  const evalNow = () => { days.forEach((d) => { d.estMinutes = estimateMinutes(d.exercises); }); return evaluateRoutine({ days, poolById, member, params }); };
+  const renumber = (d) => d.exercises.forEach((x, k) => { x.position = k + 1; });
+  const dayCap = priorities.length ? MAX_PER_DAY_PRIORITY : MAX_PER_DAY;
+  let q = evalNow();
+  let cost = qualityCost(q, days, sessionMinutes);
+  for (let it = 0; it < 40 && !q.ok; it++) {
+    let best = null;
+    const consider = (di, newList, added) => {
+      const old = days[di].exercises;
+      days[di].exercises = newList;
+      const c = qualityCost(evalNow(), days, sessionMinutes);
+      days[di].exercises = old;
+      if (c < cost - 1e-9 && (!best || c < best.c)) best = { di, newList, c, added };
+    };
+    days.forEach((d, di) => {
+      d.exercises.forEach((x, k) => {
+        const ex = poolById.get(x.exerciseId);
+        const main = isMain(ex);
+        if (ex.role === "cardio") return; // el cardio del final no se toca
+        const maxS = main ? 5 : ex.role === "core" ? 3 : 4;
+        const minS = main ? 3 : 2;
+        if (x.sets < maxS) consider(di, d.exercises.map((y, j) => (j === k ? { ...y, sets: y.sets + 1 } : y)));
+        if (x.sets > minS) consider(di, d.exercises.map((y, j) => (j === k ? { ...y, sets: y.sets - 1 } : y)));
+        // se puede sacar un ejercicio aislado, o un principal si el día ya tiene otro del mismo movimiento y músculo
+        const dup = main && d.exercises.some((y, j) => j !== k && isMain(poolById.get(y.exerciseId)) && poolById.get(y.exerciseId).pattern === ex.pattern && poolById.get(y.exerciseId).target === ex.target);
+        if ((!main || dup) && ex.role !== "cardio" && d.exercises.length > 4 && k > 0) consider(di, d.exercises.filter((_, j) => j !== k));
+      });
+      if (d.exercises.length < dayCap) {
+        for (const slotName of Object.keys(SLOTS)) {
+          if (slotName === "cardio") continue;
+          const used = new Set(d.exercises.flatMap((y) => [y.exerciseId, poolById.get(y.exerciseId).name]));
+          const fams = new Set(d.exercises.map((y) => familyOf(poolById.get(y.exerciseId).name)).filter(Boolean));
+          const pick = pickForSlot(pool, SLOTS[slotName], { effLevel, dayUsed: used, routineUsed, prevIds, rng, focus, minQ: 3, dayFamilies: fams });
+          if (!pick) continue;
+          const s = schemeFor(pick, { focus, level: member.level, prog: p, isPriority: priorityTargets.has(pick.target), first: false });
+          const item = { exerciseId: pick.id, position: 0, sets: s.sets, reps: s.reps, restSec: s.rest, note: s.note };
+          // va después del último ejercicio del mismo músculo; si no hay, antes del abdomen del final
+          let at = -1;
+          d.exercises.forEach((y, j) => { if (poolById.get(y.exerciseId).target === pick.target) at = j; });
+          if (at === -1) { at = d.exercises.length - 1; while (at >= 0 && ["core", "cardio"].includes(poolById.get(d.exercises[at].exerciseId).role)) at--; }
+          if (at >= 0 && poolById.get(d.exercises[at].exerciseId).role === "cardio") at--;
+          const list = [...d.exercises]; list.splice(at + 1, 0, item);
+          consider(di, list, pick.id);
+        }
+      }
+    });
+    if (!best) break;
+    days[best.di].exercises = best.newList;
+    if (best.added) routineUsed.add(best.added);
+    renumber(days[best.di]);
+    q = evalNow();
+    cost = qualityCost(q, days, sessionMinutes);
+  }
+  days.forEach((d) => { d.estMinutes = estimateMinutes(d.exercises); renumber(d); });
+
+  return { days, warnings, params };
+}
+
+// Genera la rutina y la pasa por el evaluador de calidad (quality.js). Si tiene fallas bloqueantes, prueba con otras
+// variantes (otra semilla) y se queda con la mejor; si ninguna queda limpia, la devuelve igual con sus fallas a la vista
+// para que el profe la revise (quality.ok = false).
+const MAX_ATTEMPTS = 12;
+function generateRoutine(input) {
+  const poolById = new Map(input.pool.map((e) => [e.id, e]));
+  let best = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const gen = generateOnce({ ...input, attempt });
+    const q = evaluateRoutine({ days: gen.days, poolById, member: input.member, params: gen.params });
+    gen.quality = { ok: q.ok, score: q.score, blockers: q.blockers, warnings: q.warnings, attempts: attempt + 1 };
+    if (!best || q.blockers.length < best.quality.blockers.length || (q.blockers.length === best.quality.blockers.length && q.score > best.quality.score)) best = gen;
+    if (q.ok && q.score >= 90) break; // limpia y sin observaciones relevantes
+  }
+  best.quality.attempts = Math.min(MAX_ATTEMPTS, best.quality.attempts);
+  return best;
 }
 
 // Ejercicios usables de la sede: habilitados, con equipamiento disponible y sin exclusión de la sede
@@ -498,6 +574,7 @@ async function loadPool(db, sedeId, { limitations = [] } = {}) {
 
 module.exports = {
   generateRoutine,
+  generateOnce,
   loadPool,
   schemeFor,
   pickForSlot,

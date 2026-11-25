@@ -65,6 +65,7 @@ function rangeFor(focus, region, { priority = false, daysPerWeek = 4 } = {}) {
   let min = SMALL.has(region) ? t.minSmall : t.min;
   if (daysPerWeek <= 3) min = Math.max(4, Math.round(min * 0.6));
   if (region === "gemelos") min = daysPerWeek >= 5 ? Math.min(min, 6) : 0;
+  if (priority && daysPerWeek >= 3) min += 2; // una zona prioritaria no se conforma con el mínimo: +2 series
   return { min, max: priority ? t.maxPriority : t.max };
 }
 

@@ -24,6 +24,10 @@ async function createRoutine(db, member, { cycleNumber, prog = DEFAULT_PROG, pre
     prevIds,
   });
 
+  // Control de calidad (quality.js): se guarda con la rutina para que el profe vea si quedó alguna falla sin resolver
+  gen.params.quality = { ok: gen.quality.ok, score: gen.quality.score, attempts: gen.quality.attempts, blockers: gen.quality.blockers.map((b) => b.msg), warnings: gen.quality.warnings.map((w) => w.msg).slice(0, 8) };
+  if (!gen.quality.ok) gen.warnings.push(...gen.quality.blockers.map((b) => `Control de calidad: ${b.msg}`));
+
   const total = gen.days.reduce((a, d) => a + d.exercises.length, 0);
   if (total === 0) {
     throw new AppError(409, "EMPTY_POOL", "La sede no tiene ejercicios disponibles para armar la rutina (revisá el equipamiento de la sede).");
@@ -164,6 +168,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       startsOn: routine.starts_on,
       endsOn: routine.ends_on,
       priorities: routine.params?.priorities ?? [],
+      quality: routine.params?.quality ?? null,
       weekOfCycle: weekOfCycle(routine.starts_on, today),
       deload,
       deloadNote: deload ? DELOAD_NOTE : null,
