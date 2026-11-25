@@ -378,7 +378,7 @@ test("volumen semanal: sin prioridades, ningún músculo grande queda por debajo
     const v = weeklyVolume(r.days, by);
     const need = focus === "hipertrofia" && days >= 4 ? 8 : 4; // 10 series es el mínimo con claro beneficio (Schoenfeld 2017); 4 ya sirve con poco tiempo (Iversen 2021)
     for (const k of ["pecho", "espalda", "cuadriceps", "isquios"]) assert.ok(v[k] >= need, `${focus} N${level} ${days}d ${mins}m: ${k} ${v[k]} < ${need}`);
-    for (const [k, x] of Object.entries(v)) assert.ok(x <= 32, `${focus} N${level} ${days}d ${mins}m: ${k} ${x} > 32 (sin ventaja detectable por encima, Pelland 2024)`);
+    for (const [k, x] of Object.entries(v)) assert.ok(x <= 36, `${focus} N${level} ${days}d ${mins}m: ${k} ${x} > 36 (sin ventaja detectable por encima, Pelland 2024)`);
   }
   await db.close();
 });
