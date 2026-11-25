@@ -1,0 +1,26 @@
+# Blueprint de Render: New > Blueprint > elegir este repo.
+# Las claves (sync: false) las cargás vos en el panel de Render; no se guardan en el repo.
+services:
+  - type: web
+    name: rutinas-gym
+    runtime: node
+    plan: free            # se duerme sin uso; para uso real pasá a un plan pago
+    rootDir: backend
+    buildCommand: npm install && npm run dataset:fetch
+    startCommand: npm run migrate && npm run import && npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL        # connection string de Neon
+        sync: false
+      - key: ADMIN_KEY           # 12 caracteres o más: es la clave de /admin.html
+        sync: false
+      - key: OPENROUTER_API_KEY  # clave de Groq (o del proveedor que uses)
+        sync: false
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: AI_MODEL
+        value: openai/gpt-oss-120b
+      - key: TRUST_PROXY
+        value: "1"
+      - key: PUBLIC_URL          # la URL que te asigne Render (https://....onrender.com)
+        sync: false
