@@ -277,14 +277,17 @@ test("equipamiento: desactivar un tipo en una sede reemplaza en las rutinas acti
   const t = await setup();
   const m = await t.createMember({ nombre: "Hugo", sedeId: 2, level: 2, daysPerWeek: 5, focus: "hipertrofia" });
   const before = (await t.call("GET", "/api/me", { token: m.token })).json;
-  const usesCable = ALL_EX(before).some((x) => x.exercise.equipment === "cable");
-  assert.ok(usesCable, "la rutina de prueba usa poleas (si no, el test no prueba nada)");
+  // Se desactiva el equipo (máquina o elemento) que más usa la rutina de prueba, sea cual sea
+  const counts = {};
+  for (const x of ALL_EX(before)) if (!["body weight", "barbell", "dumbbell"].includes(x.exercise.equipment)) counts[x.exercise.equipment] = (counts[x.exercise.equipment] || 0) + 1;
+  const key = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  assert.ok(key, "la rutina de prueba usa alguna máquina o elemento (si no, el test no prueba nada)");
 
-  const r = await t.adminApi("PUT", "/api/admin/sedes/2/equipment", { equipment: "cable", available: false });
+  const r = await t.adminApi("PUT", "/api/admin/sedes/2/equipment", { equipment: key, available: false });
   assert.equal(r.status, 200);
   assert.ok(r.json.replaced >= 1);
   const after = (await t.call("GET", "/api/me", { token: m.token })).json;
-  assert.ok(!ALL_EX(after).some((x) => x.exercise.equipment === "cable"));
+  assert.ok(!ALL_EX(after).some((x) => x.exercise.equipment === key));
   assert.equal((await t.adminApi("PUT", "/api/admin/sedes/9/equipment", { equipment: "cable", available: false })).status, 404);
   await t.close();
 });

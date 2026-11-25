@@ -61,7 +61,7 @@ test("generador: todas las combinaciones de nivel x días x enfoque son válidas
         assert.equal(r.days.length, daysPerWeek);
         assert.deepEqual(r.warnings, [], `sin huecos sin llenar (${level}/${daysPerWeek}/${focus})`);
         for (const d of r.days) {
-          assert.ok(d.exercises.length >= 5, "al menos 5 ejercicios por día");
+          assert.ok(d.exercises.length >= 4, "al menos 4 ejercicios por día");
           const ids = d.exercises.map((x) => x.exerciseId);
           assert.equal(new Set(ids).size, ids.length, "sin repetidos dentro del día");
           for (const x of d.exercises) {
@@ -250,5 +250,38 @@ test("nombres en español: se guardan al importar y la vista del socio los usa",
   assert.ok(rows[0].es / rows[0].n > 0.6, `cobertura ${rows[0].es}/${rows[0].n}`);
   const { rows: one } = await db.query("SELECT name, name_es FROM exercises WHERE name = 'dumbbell biceps curl'");
   assert.equal(one[0].name_es, "Curl de bíceps con mancuernas");
+  await db.close();
+});
+
+test("tiempo de sesión: los minutos estimados acompañan lo que pidió el socio y la cantidad de ejercicios", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  let days = 0, off = 0;
+  for (const level of [1, 2, 3]) for (const daysPerWeek of [2, 3, 4, 5, 6]) for (const focus of ["hipertrofia", "general", "fuerza"]) for (const sessionMinutes of [45, 60, 75]) {
+    const r = generateRoutine({ pool, member: { id: 5, level, daysPerWeek, focus, priorities: [], sessionMinutes, gender: "mujer" }, cycleNumber: 1 });
+    for (const d of r.days) {
+      days++;
+      if (Math.abs(d.estMinutes - sessionMinutes) > 10) off++;
+      assert.ok(d.exercises.length >= 3);
+    }
+  }
+  assert.ok(off / days < 0.03, `${off} de ${days} días se desvían más de 10 minutos`);
+  // Más minutos, más ejercicios (mismo socio)
+  const count = (m) => generateRoutine({ pool, member: { id: 5, level: 2, daysPerWeek: 4, focus: "hipertrofia", priorities: [], sessionMinutes: m }, cycleNumber: 1 }).days[0].exercises.length;
+  assert.ok(count(75) > count(45));
+  await db.close();
+});
+
+test("calidad de ejercicios: en ganar músculo no entran rarezas ni ejercicios que no se pueden cargar", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  const bad = /clock|cuban|stork|dip cage|self assisted|pelvic tilt|bench pull-?up|behind (head|neck)|resistance band|on knees/i;
+  let total = 0, rare = 0;
+  for (let id = 1; id <= 30; id++) for (const level of [1, 2, 3]) {
+    const r = generateRoutine({ pool, member: { id, level, daysPerWeek: 4, focus: "hipertrofia", priorities: [], sessionMinutes: 60 }, cycleNumber: 1 });
+    for (const d of r.days) for (const x of d.exercises) { total++; if (bad.test(by.get(x.exerciseId).name)) rare++; }
+  }
+  assert.ok(rare / total < 0.01, `${rare} de ${total} ejercicios raros`);
   await db.close();
 });

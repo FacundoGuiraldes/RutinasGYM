@@ -133,10 +133,16 @@ function applyPriorities(names, priorities, level) {
   return { names: out, added };
 }
 
-// Minutos estimados de una sesión: entrada en calor + (series x (40 s de trabajo + descanso))
+// Minutos estimados de una sesión, como pasa en una sala real:
+//  - 5 min de entrada en calor general
+//  - por ejercicio: 60 s para acomodarse o cargar la máquina + series x (45 s de trabajo + descanso)
+//  - el primer ejercicio pesado lleva 2 series de aproximación (~3 min)
 function estimateMinutes(exercises) {
   let sec = 5 * 60;
-  for (const e of exercises) sec += e.restSec == null ? 12 * 60 : e.sets * (40 + e.restSec);
+  exercises.forEach((e, i) => {
+    sec += e.restSec == null ? 12 * 60 : 60 + e.sets * (45 + e.restSec);
+    if (i === 0 && e.restSec != null && e.restSec >= 90) sec += 150;
+  });
   return Math.round(sec / 60 / 5) * 5;
 }
 
@@ -211,7 +217,28 @@ function schemeFor(ex, { focus, level, prog, isPriority = false, first = false }
 // Ejercicios que cargan el músculo en posición estirada (long muscle length). La evidencia reciente
 // los favorece para hipertrofia, así que en ese enfoque pesan más al sortear entre candidatos.
 const LENGTHENED = /incline (dumbbell |barbell |cable )?(press|curl|fly|flye)|romanian|stiff[- ]leg|good morning|overhead (triceps )?extension|french press|skull ?crusher|pull-?over|\bfly\b|\bflye\b|seated leg curl|lying leg curl|preacher curl|hack squat|bulgarian|split squat|front squat|full squat|cable crossover|\bdip\b|calf raise/i;
-const lengthenedBoost = (e, focus) => (focus === "hipertrofia" && LENGTHENED.test(e.name) ? 1.8 : 1);
+// Ejercicios raros, de rehabilitación o demasiado livianos para el objetivo: se evitan salvo que no haya otra opción.
+const ODD = /\b(clock|cuban|stork|typewriter|archer|spider|dip cage|self assisted|inverse|isometric|bosu|behind (head|neck)|jefferson|zercher|bradford|sissy|pistol|bottoms|drag curl|on knees|kneeling push|wall|sphinx|stability ball|exercise ball|suspended|towel|poles?|modified|bench pull-?ups?|pelvic tilt|glute bridge|low glute|squat row|front raise|v\. 2)\b/i;
+const FILLER = /\b(front raise|wrist|finger|forearm|neck|plate|kickback|side bend|twist|rotation|jack ?knife|v-up)\b/i;
+const CANON = /^(barbell|dumbbell|smith|lever|cable|sled)?\s*(incline |decline )?(bench press|chest press|squat|full squat|front squat|romanian deadlift|deadlift|shoulder press|seated shoulder press|military press|bent over row|seated row|row|lat pulldown|pulldown|leg press|hip thrust|pull-?up|chin-?up|biceps curl|hammer curl|preacher curl|triceps extension|pushdown|lateral raise|leg curl|leg extension|calf raise|fly|lunge|crunch|leg raise)\b/i;
+function qualityWeight(e, focus) {
+  let w = 1;
+  if (ODD.test(e.name)) w *= 0.08;
+  // Para ganar músculo o fuerza: la banda elástica y el peso corporal en aislados rinden poco (no hay cómo cargarlos)
+  if (focus === "hipertrofia" || focus === "fuerza") {
+    if (/band/.test(e.equipment)) w *= 0.12;
+    if (e.equipment === "body weight" && e.role === "isolation") w *= 0.15;
+    if (e.role === "compound" && e.equipment === "body weight" && /push-?up|crunch|sit-?up/i.test(e.name)) w *= 0.3;
+  }
+  if (focus === "hipertrofia" && FILLER.test(e.name) && e.target !== "abs") w *= 0.2;
+  // Peso corporal como ejercicio principal: solo sirven las dominadas, fondos y remos invertidos (se pueden hacer difíciles)
+  if (e.role === "compound" && e.equipment === "body weight" && !/pull-?up|chin-?up|\bdips?\b|inverted row|muscle-?up/i.test(e.name) && focus !== "bajar_grasa") w *= 0.25;
+  if (/good morning|scott press|full can|hammer press|off dumbbell|reverse grip|wide squat|side split/i.test(e.name)) w *= 0.25;
+  // Los básicos que arman una rutina de verdad
+  if (focus !== "bajar_grasa" && CANON.test(e.name)) w *= 2.5;
+  return w;
+}
+const lengthenedBoost = (e, focus) => (focus === "hipertrofia" && LENGTHENED.test(e.name) ? 3.5 : 1);
 
 // Candidatos para un slot, relajando criterios de a poco si no hay ninguno:
 // 1) rol + patrón exactos, 2) solo rol, 3) cualquier ejercicio usable del músculo.
@@ -226,10 +253,12 @@ function pickForSlot(pool, slot, { effLevel, dayUsed, routineUsed, prevIds, rng,
     const cands = base.filter(tier).filter((e) => !dayUsed.has(e.id));
     if (!cands.length) continue;
     const fresh = cands.filter((e) => !routineUsed.has(e.id));
-    const list = fresh.length ? fresh : cands;
+    // Preferimos no repetir, pero no a costa de calidad: si lo "nuevo" es una rareza y hay un buen ejercicio ya usado, se repite ese
+    const good = (arr) => arr.some((e) => qualityWeight(e, focus) >= 0.3);
+    const list = fresh.length && (good(fresh) || !good(cands)) ? fresh : cands;
     return weightedPick(
       list,
-      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * lengthenedBoost(e, focus),
+      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 3 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * lengthenedBoost(e, focus) * qualityWeight(e, focus),
       rng
     );
   }
@@ -255,8 +284,9 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
   const effLevel = Math.min(3, member.level + p.levelBoost);
   const rng = mulberry32(hashString(`${member.id}:${cycleNumber}`));
   const routineUsed = new Set();
+  const poolById = new Map(pool.map((e) => [e.id, e]));
   const warnings = [];
-  const baseCount = clamp(BASE_COUNT[member.level] + SESSION_DELTA[sessionMinutes] + p.extraPerDay, 4, MAX_PER_DAY);
+  const baseCount = clamp(BASE_COUNT[member.level] + SESSION_DELTA[sessionMinutes], 4, MAX_PER_DAY);
   const { list: priorities, source: prioritiesSource } = resolvePriorities({ focus, priorities: member.priorities, gender: member.gender });
   const priorityTargets = new Set(priorities.flatMap((z) => ZONES[z].targets));
 
@@ -296,6 +326,35 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
     for (const name of slotNames) {
       if (exercises.length >= count) break;
       if (!fill(name)) warnings.push(`Día ${i + 1}: no hubo ejercicio disponible para "${name}"`);
+    }
+    // Ajuste al tiempo que pidió el socio: se suman ejercicios si sobra tiempo y se sacan si falta
+    if (focus !== "fuerza" || true) {
+      const target = sessionMinutes;
+      const cap = priorities.length ? MAX_PER_DAY_PRIORITY : MAX_PER_DAY;
+      const extras = [...tpl.extra, ...tpl.slots];
+      for (let k = 0; k < 12 && exercises.length < cap && estimateMinutes(exercises) < target - 7; k++) fill(extras[k % extras.length]);
+      // Al recortar, cada músculo conserva al menos un ejercicio en el día:
+      //  1) sale primero lo repetido de zonas NO prioritarias, 2) después el exceso de las prioritarias (más de 3 por músculo),
+      //  3) si igual se pasa por mucho, lo último. Así la zona prioritaria sigue siendo la que más trabaja.
+      const floor = focus === "fuerza" && target <= 45 ? 3 : 4;
+      const tgt = (x) => poolById.get(x.exerciseId)?.target;
+      const timesOf = (t) => exercises.filter((x) => tgt(x) === t).length;
+      const dropAt = (idx) => { dayUsed.delete(exercises[idx].exerciseId); exercises.splice(idx, 1); };
+      while (exercises.length > floor) {
+        const over = estimateMinutes(exercises) - target;
+        if (over <= 7) break;
+        let idx = -1;
+        if (!priorities.length) idx = exercises.length - 1; // sin prioridades: simplemente lo último
+        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (!priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 1) idx = k;
+        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 3) idx = k;
+        if (idx === -1 && over > 25) idx = exercises.length - 1;
+        if (idx === -1) break;
+        dropAt(idx);
+      }
+      exercises.forEach((x, k) => { x.position = k + 1; });
+      // La progresión mensual suma (o saca) ejercicios por día encima de lo que entra en el tiempo pedido
+      for (let k = 0; k < p.extraPerDay; k++) fill(extras[k % extras.length]);
+      for (let k = 0; k > p.extraPerDay && exercises.length > 3; k--) { const last = exercises.pop(); dayUsed.delete(last.exerciseId); }
     }
     // Bajar grasa: cierre con cardio
     if (focus === "bajar_grasa") fill("cardio");
