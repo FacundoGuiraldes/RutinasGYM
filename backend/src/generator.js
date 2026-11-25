@@ -226,7 +226,7 @@ const LENGTHENED = /incline (dumbbell |barbell |cable )?(press|curl|fly|flye)|ro
 // Ejercicios raros, de rehabilitación o demasiado livianos para el objetivo: se evitan salvo que no haya otra opción.
 const ODD = /\b(clock|cuban|stork|typewriter|archer|spider|dip cage|self assisted|inverse|isometric|bosu|behind (head|neck)|jefferson|zercher|bradford|sissy|pistol|bottoms|drag curl|on knees|kneeling push|wall|sphinx|stability ball|exercise ball|suspended|towel|poles?|modified|bench pull-?ups?|pelvic tilt|glute bridge|low glute|squat row|front raise|v\. 2)\b/i;
 const FILLER = /\b(front raise|wrist|finger|forearm|neck|plate|kickback|side bend|twist|rotation|jack ?knife|v-up)\b/i;
-const STAPLE_WEIGHT = { 1: 10, 2: 2, 3: 0.3 };
+const STAPLE_WEIGHT = { 0: 30, 1: 10, 2: 2, 3: 0.3 };
 function qualityWeight(e, focus) {
   let w = 1;
   if (ODD.test(e.name)) w *= 0.08;
@@ -353,22 +353,29 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
       ctx.minQ = 3; // para completar tiempo solo entran ejercicios buenos (nunca una rareza de relleno)
       for (let k = 0; k < 12 && exercises.length < cap && estimateMinutes(exercises) < target - 7; k++) fill(extras[k % extras.length]);
       ctx.minQ = 0;
-      // Al recortar, cada músculo conserva al menos un ejercicio en el día:
-      //  1) sale primero lo repetido de zonas NO prioritarias, 2) después el exceso de las prioritarias (más de 3 por músculo),
-      //  3) si igual se pasa por mucho, lo último. Así la zona prioritaria sigue siendo la que más trabaja.
+      // Si el día se pasa del tiempo pedido se recorta en este orden (la zona prioritaria es lo último que se toca):
+      //  1) ejercicios repetidos de un músculo NO prioritario, 2) una serie menos en lo no prioritario (mínimo 2),
+      //  3) exceso de la zona prioritaria (más de 3 ejercicios por músculo), 4) lo último del día.
+      // Cada músculo conserva siempre al menos un ejercicio. Meta: nunca más de +10 minutos sobre lo pedido.
       const floor = focus === "fuerza" && target <= 45 ? 3 : 4;
       const tgt = (x) => poolById.get(x.exerciseId)?.target;
       const timesOf = (t) => exercises.filter((x) => tgt(x) === t).length;
       const dropAt = (idx) => { dayUsed.delete(exercises[idx].exerciseId); exercises.splice(idx, 1); };
-      while (exercises.length > floor) {
-        const over = estimateMinutes(exercises) - target;
-        if (over <= 7) break;
+      const tooLong = () => estimateMinutes(exercises) - target > 7;
+      while (exercises.length > floor && tooLong()) {
         let idx = -1;
         if (!priorities.length) idx = exercises.length - 1; // sin prioridades: simplemente lo último
         for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (!priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 1) idx = k;
-        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 3) idx = k;
-        if (idx === -1 && over > 25) idx = exercises.length - 1;
         if (idx === -1) break;
+        dropAt(idx);
+      }
+      for (let k = exercises.length - 1; k > 0 && tooLong(); k--) {
+        if (!priorityTargets.has(tgt(exercises[k])) && exercises[k].sets > 2) exercises[k].sets -= 1;
+      }
+      while (exercises.length > floor && tooLong()) {
+        let idx = -1;
+        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 3) idx = k;
+        if (idx === -1) idx = exercises.length - 1;
         dropAt(idx);
       }
       exercises.forEach((x, k) => { x.position = k + 1; });

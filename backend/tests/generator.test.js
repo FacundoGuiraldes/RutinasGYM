@@ -288,8 +288,8 @@ test("calidad de ejercicios: en ganar músculo no entran rarezas ni ejercicios q
 
 test("básicos primero: casi todo lo que se elige es un ejercicio de toda la vida y nada de lo que nadie usa", { skip }, async () => {
   const { staple, isJunk } = require("../src/staples");
-  assert.equal(staple("barbell bench press"), 1);
-  assert.equal(staple("lever leg extension"), 1);
+  assert.equal(staple("barbell bench press"), 0);
+  assert.equal(staple("lever leg extension"), 0);
   assert.equal(isJunk("front lever", "body weight"), true);
   assert.equal(isJunk("barbell snatch", "barbell"), true);
   assert.equal(isJunk("dumbbell fly on exercise ball", "dumbbell"), true);
@@ -303,7 +303,7 @@ test("básicos primero: casi todo lo que se elige es un ejercicio de toda la vid
   let total = 0, tier1 = 0, tier3 = 0;
   for (let id = 1; id <= 25; id++) for (const focus of ["hipertrofia", "general", "fuerza", "bajar_grasa"]) for (const level of [1, 2, 3]) {
     const r = generateRoutine({ pool, member: { id, level, daysPerWeek: 4, focus, priorities: [], sessionMinutes: 60 }, cycleNumber: 1 });
-    for (const d of r.days) for (const x of d.exercises) { const e = by.get(x.exerciseId); if (e.role === "cardio") continue; total++; const t = staple(e.name); if (t === 1) tier1++; if (t === 3) tier3++; }
+    for (const d of r.days) for (const x of d.exercises) { const e = by.get(x.exerciseId); if (e.role === "cardio") continue; total++; const t = staple(e.name); if (t <= 1) tier1++; if (t === 3) tier3++; }
   }
   assert.ok(tier1 / total > 0.7, `básicos ${(tier1 / total).toFixed(2)}`);
   assert.equal(tier3, 0, "ningún ejercicio fuera de lo común cuando hay alternativas");

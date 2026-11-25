@@ -31,13 +31,42 @@ const T1 = [
   /^(crunch floor|cable seated crunch|cable standing crunch|hanging leg raise|reverse crunch|decline crunch|lying leg raise flat bench)$/, /^plank$/,
 ];
 
-// Variantes comunes: equipo estándar y un movimiento clásico al final del nombre
-const T2 = /^(barbell|dumbbell|cable|lever|smith|sled|ez barbell|trap bar)\s(?:[a-z-]+\s){0,3}(press|row|curl|raise|extension|squat|lunge|pulldown|pushdown|fly|deadlift|crunch|pullover|kickback|shrug|dip|bridge)$/;
+// Variantes comunes: equipo estándar + movimiento clásico + solo modificadores comunes (posición, agarre, lado).
+// Si el nombre trae algo raro (tate, peacher, side split, hip extension...) cae en el nivel 3.
+const EQUIP = new Set(["barbell", "dumbbell", "cable", "lever", "smith", "sled", "ez barbell", "trap bar"]);
+const MOVES = new Set(["press", "row", "curl", "raise", "extension", "squat", "lunge", "pulldown", "pushdown", "fly", "deadlift", "crunch", "pullover", "kickback", "shrug", "dip", "bridge"]);
+const MODS = new Set(["seated", "standing", "incline", "decline", "flat", "alternate", "one", "arm", "leg", "wide", "close", "narrow", "grip", "close-grip", "wide-grip", "reverse", "neutral", "parallel", "hammer", "preacher", "lying", "bent", "over", "low", "high", "rear", "front", "full", "underhand", "overhand", "single", "two", "bench", "shoulder", "chest", "biceps", "triceps", "lateral", "overhead", "romanian", "stiff", "straight", "back", "lat", "upper", "v-bar", "rope", "goblet", "military", "arnold", "leg", "calf", "hip", "t", "bar", "t-bar"]);
+const BAD_MODS = /bench squat|bench front|stiff leg|straight leg|^(cable|lever|smith) deadlift|lateral pulldown|rear pulldown|overhand triceps|bent arm|standing preacher|alternate preacher|alternate (overhead|shoulder)|wide grip decline|tate|peacher|side split|hip extension|cuban|scott|twist|jm\b|rocking|palm|kneeling|prone|decline close|upper row|wide military|underhand pulldown|bar lateral/;
 
+function isCommonVariant(n) {
+  if (BAD_MODS.test(n)) return false;
+  const plain = n.replace(/\((with rope( attachment)?|v-bar)\)/g, "").replace(/\s+/g, " ").trim();
+  if (/[()]/.test(plain)) return false;
+  const words = plain.split(" ");
+  const eq = EQUIP.has(`${words[0]} ${words[1]}`) ? 2 : EQUIP.has(words[0]) ? 1 : 0;
+  if (!eq) return false;
+  const rest = words.slice(eq);
+  const last = rest.at(-1);
+  if (!MOVES.has(last)) return false;
+  return rest.slice(0, -1).every((w) => MODS.has(w));
+}
+
+// Los 15 ejercicios con más respaldo y uso (nivel 0): multiarticulares pesados y los aislados clásicos
+const T0 = [
+  /^(barbell|dumbbell) (incline )?bench press$/, /^lever (incline )?chest press$/, /^(pull-up|chin-up)$/, /^cable (lat )?pulldown/, /^lever front pulldown$/,
+  /^cable (low |straight back )?seated row$/, /^lever (narrow grip )?seated row$/, /^barbell bent over row$/, /^dumbbell (bent over|one arm bent-over) row$/, /^lever t bar row$/,
+  /^dumbbell seated shoulder press$/, /^barbell seated overhead press$/, /^lever military press$/,
+  /^(barbell full squat|dumbbell goblet squat|barbell front squat)$/, /^(sled )?(45.*)?leg press$|^lever horizontal leg press$/, /^(barbell|dumbbell) romanian deadlift$/, /^barbell deadlift$/, /^barbell glute bridge$/,
+  /^(dumbbell|barbell) (rear )?lunge$/, /^lever (lying|seated) leg curl$/, /^lever leg extension$/, /^lever (standing|seated) calf raise$/,
+  /^(barbell curl|dumbbell biceps curl|dumbbell hammer curl|cable curl)$/, /^cable (pushdown|triceps pushdown \(v-bar\))$/, /^dumbbell lateral raise$/, /^cable lateral raise$/, /^lever seated reverse fly$/, /^dumbbell rear lateral raise$/,
+];
+
+// 0 = los de mayor respaldo y uso, 1 = básicos, 2 = variantes comunes, 3 = todo lo demás
 function staple(name) {
-  const n = String(name).toLowerCase().replace(/\s+/g, " ").trim();
+  const n = String(name).toLowerCase().replace(/\(male\)|\(female\)/g, "").replace(/\s+/g, " ").trim();
+  if (T0.some((re) => re.test(n))) return 0;
   if (T1.some((re) => re.test(n))) return 1;
-  if (T2.test(n)) return 2;
+  if (isCommonVariant(n)) return 2;
   return 3;
 }
 
@@ -58,4 +87,4 @@ function isJunk(name, equipment) {
   return JUNK.test(n);
 }
 
-module.exports = { staple, isJunk, T1, T2 };
+module.exports = { staple, isJunk, T0, T1 };
