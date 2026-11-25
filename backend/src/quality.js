@@ -48,9 +48,10 @@ function evaluateRoutine({ days, poolById, member, params }) {
     if (nonCardio.length > 11) block("MUCHOS_EJ", `${label}: ${nonCardio.length} ejercicios; es más de lo que entra en una sesión.`);
 
     // 3) Tiempo coherente con los minutos pedidos
-    const diff = d.estMinutes - sessionMinutes;
-    if (Math.abs(diff) > 15) block("TIEMPO", `${label}: dura unos ${d.estMinutes} min y el socio tiene ${sessionMinutes}.`);
-    else if (Math.abs(diff) > 10) warn("TIEMPO_JUSTO", `${label}: ${d.estMinutes} min contra ${sessionMinutes} pedidos.`, 3);
+    // La duración es un rango [piso, piso + 15]; pasarse unos minutos del tope es normal (75 puede llegar a 80)
+    const hi = sessionMinutes + 15;
+    if (d.estMinutes > hi + 8 || d.estMinutes < sessionMinutes - 10) block("TIEMPO", `${label}: dura unos ${d.estMinutes} min y el socio eligió de ${sessionMinutes} a ${hi}.`);
+    else if (d.estMinutes > hi + 5 || d.estMinutes < sessionMinutes - 3) warn("TIEMPO_JUSTO", `${label}: ${d.estMinutes} min contra el rango de ${sessionMinutes} a ${hi}.`, 3);
 
     // 4) Sin repetidos ni dos veces el mismo movimiento
     const names = new Set();
@@ -121,7 +122,8 @@ function evaluateRoutine({ days, poolById, member, params }) {
     const floorMin = daysPerWeek <= 2 ? Math.min(min, 4) : min;
     if (BIG.includes(r) || prio) deficit += Math.max(0, floorMin - v);
     if (v < floorMin) {
-      const severe = (BIG.includes(r) || prio) && v < floorMin * (prio ? 0.9 : 0.8);
+      // con 45 a 60 min no entra el volumen ideal de todas las zonas: ahí la tolerancia es mayor
+      const severe = (BIG.includes(r) || prio) && v < floorMin * (sessionMinutes <= 45 ? 0.65 : 0.8);
       (severe ? block : (c, m) => warn(c, m, 3))("VOLUMEN_BAJO", `${r}: ${v} series por semana; el mínimo útil para este perfil es ${floorMin}.`);
     }
     if (v > 36) block("VOLUMEN_ALTO", `${r}: ${v} series por semana; no hay ventaja detectable arriba de ~31 (Pelland 2024).`);
@@ -134,6 +136,9 @@ function evaluateRoutine({ days, poolById, member, params }) {
       (priorityRegions.has(r) ? block : (c, m) => warn(c, m, 5))("SIN_DIRECTO", `${r}: ningún ejercicio directo en toda la semana.`);
     }
   }
+  // Glúteos prioritarios: hace falta trabajo directo (hip thrust, puente, pull through), no solo el indirecto de la sentadilla y el peso muerto
+  if (priorityRegions.has("gluteos") && daysPerWeek >= 3) deficit += Math.max(0, 6 - direct.gluteos);
+  if (priorityRegions.has("gluteos") && daysPerWeek >= 3 && direct.gluteos < (sessionMinutes <= 45 || daysPerWeek <= 4 ? 4 : 6)) block("GLUTEO_DIRECTO", `gluteos (prioritario): ${direct.gluteos} series directas por semana; hace falta hip thrust, puente de glúteos o similar (al menos ${sessionMinutes <= 45 || daysPerWeek <= 4 ? 4 : 6}).`);
   for (const r of ["hombros"]) {
     if (focus === "hipertrofia" && direct[r] < 4) warn("SIN_DIRECTO", `${r}: menos de 4 series directas por semana.`, 4);
   }
@@ -171,7 +176,7 @@ function evaluateRoutine({ days, poolById, member, params }) {
 // Costo para comparar variantes de una misma rutina: cada falla bloqueante pesa mucho, cada observación según su peso,
 // y se castiga alejarse del tiempo pedido (más allá de 7 min de margen).
 function qualityCost(q, days, sessionMinutes) {
-  const time = days.reduce((a, d) => a + Math.max(0, Math.abs(d.estMinutes - sessionMinutes) - 7) * 0.5, 0);
+  const time = days.reduce((a, d) => a + Math.max(0, sessionMinutes - d.estMinutes, d.estMinutes - sessionMinutes - 18) * 0.5, 0);
   return q.blockers.length * 20 + q.penalty + q.deficit * 0.7 + time;
 }
 

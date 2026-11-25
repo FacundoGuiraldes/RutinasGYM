@@ -8,6 +8,7 @@ const { createPgDb, migrate } = require("./db");
 const { createAi } = require("./ai");
 const { createApp } = require("./app");
 const { closeDueCycles } = require("./progression");
+const { ensureCustomExercises } = require("./importer");
 
 async function main() {
   const { DATABASE_URL, ADMIN_KEY } = process.env;
@@ -16,6 +17,7 @@ async function main() {
 
   const db = createPgDb(DATABASE_URL);
   await migrate(db);
+  try { const n = await ensureCustomExercises(db); if (n) console.log(`Ejercicios propios agregados: ${n}`); } catch (err) { console.error("No se pudieron agregar los ejercicios propios:", err.message); }
 
   const datasetDir = path.resolve(process.env.DATASET_DIR || path.join(__dirname, "../dataset"));
   const ai = createAi();

@@ -6,7 +6,7 @@
   const dlg = document.getElementById("dlg");
   const FOCUS = { general: "General", hipertrofia: "Ganar músculo", fuerza: "Fuerza", bajar_grasa: "Bajar grasa" };
   const GENDER_OPTS = [{ v: "", t: "Sin dato" }, { v: "mujer", t: "Mujer" }, { v: "hombre", t: "Hombre" }, { v: "otro", t: "Otro" }];
-  const MIN_OPTS = [{ v: 45, t: "45 min" }, { v: 60, t: "60 min" }, { v: 75, t: "75 min" }];
+  const MIN_OPTS = [{ v: 45, t: "45 a 60 min" }, { v: 60, t: "60 a 75 min" }, { v: 75, t: "75 a 90 min" }];
   const ZONE_OPTS = [{ v: "pecho", t: "Pecho" }, { v: "espalda", t: "Espalda" }, { v: "hombros", t: "Hombros" }, { v: "brazos", t: "Brazos" }, { v: "piernas", t: "Piernas" }, { v: "gluteos", t: "Glúteos" }, { v: "abdomen", t: "Abdomen" }];
   let key = sessionStorage.getItem("adminKey");
   let tab = "socios";

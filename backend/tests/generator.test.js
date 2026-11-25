@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { createSeededDb, findDatasetFile } = require("./helpers");
 const { classifyExercise } = require("../src/classify");
-const { importCatalog } = require("../src/importer");
+const { importCatalog, CUSTOM_EXERCISES } = require("../src/importer");
 const { loadPool, generateRoutine, FOCUSES, USABLE_ROLES } = require("../src/generator");
 
 const datasetFile = findDatasetFile();
@@ -29,7 +29,7 @@ test("importador: catálogo completo, idempotente y respeta correcciones del adm
   const records = JSON.parse(fs.readFileSync(datasetFile, "utf8"));
 
   const { rows: n } = await db.query("SELECT COUNT(*)::int AS n FROM exercises");
-  assert.equal(n[0].n, records.length);
+  assert.equal(n[0].n, records.length + CUSTOM_EXERCISES.length, "dataset + ejercicios propios (hip thrust)");
   const { rows: sedes } = await db.query("SELECT nombre FROM sedes ORDER BY nombre");
   assert.deepEqual(sedes.map((s) => s.nombre), ["Martínez", "Olivos"]);
   const { rows: unclassified } = await db.query("SELECT COUNT(*)::int AS n FROM exercises WHERE role IS NULL OR level IS NULL");
@@ -44,7 +44,7 @@ test("importador: catálogo completo, idempotente y respeta correcciones del adm
   const { rows: cable } = await db.query("SELECT available FROM sede_equipment WHERE sede_id = 1 AND equipment_id = (SELECT id FROM equipment WHERE key = 'cable')");
   assert.equal(cable[0].available, false);
   const { rows: n2 } = await db.query("SELECT COUNT(*)::int AS n FROM exercises");
-  assert.equal(n2[0].n, records.length, "no duplica");
+  assert.equal(n2[0].n, records.length + CUSTOM_EXERCISES.length, "no duplica");
   await db.close();
 });
 
@@ -430,4 +430,33 @@ test("quality: ningún perfil típico sale con fallas bloqueantes (nivel, días,
     }
   await db.close();
   assert.equal(fails.length, 0, `${fails.length} rutinas con fallas:\n${fails.slice(0, 5).join("\n")}`);
+});
+
+test("hip thrust: existe, tiene foto del dataset y es la primera opción de glúteos", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const ht = pool.find((e) => e.name === "barbell hip thrust");
+  assert.ok(ht, "el hip thrust está en el pool");
+  const { rows } = await db.query("SELECT image_path, gif_path, name_es FROM exercises WHERE id = 'custom-hip-thrust-barbell'");
+  assert.ok(rows[0].image_path && rows[0].gif_path, "usa el material del puente de glúteos en banco");
+  assert.equal(rows[0].name_es, "Hip thrust con barra");
+  // con glúteos prioritarios, aparece en la semana de la mayoría de los perfiles
+  let con = 0, total = 0;
+  for (const level of [1, 2, 3]) for (const days of [3, 4, 5]) {
+    const r = generateRoutine({ pool, member: { id: ++total, level, daysPerWeek: days, focus: "hipertrofia", priorities: ["gluteos", "piernas"], sessionMinutes: 60, gender: "mujer" }, cycleNumber: 1 });
+    if (r.days.some((d) => d.exercises.some((x) => x.exerciseId === ht.id))) con++;
+  }
+  assert.ok(con >= total * 0.6, `hip thrust en ${con}/${total} rutinas con glúteos prioritarios`);
+  await db.close();
+});
+
+test("duraciones por rango: 45-60, 60-75 y 75-90; cada día queda dentro del rango o a pocos minutos", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  let n = 0;
+  for (const lo of [45, 60, 75]) for (const days of [3, 4, 5]) for (const level of [1, 2, 3]) {
+    const r = generateRoutine({ pool, member: { id: ++n, level, daysPerWeek: days, focus: "hipertrofia", priorities: [], sessionMinutes: lo, gender: "hombre" }, cycleNumber: 1 });
+    for (const d of r.days) assert.ok(d.estMinutes >= lo - 10 && d.estMinutes <= lo + 15 + 8, `${lo}-${lo + 15}: ${d.label} dura ${d.estMinutes}`);
+  }
+  await db.close();
 });

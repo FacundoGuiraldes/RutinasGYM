@@ -23,7 +23,7 @@ const T1 = [
   /^(dumbbell|barbell) (rear )?lunge$/, /^split squats$/, /^dumbbell (rear )?(lunge|split squat)/,
   /^lever (lying|seated|kneeling) leg curl$/, /^lever leg extension$/, /^lever (standing|seated) calf raise$/, /^cable standing calf raise$/,
   // Glúteos
-  /^barbell glute bridge$/, /^glute bridge two legs on bench/, /^cable pull through/, /^cable kickback$/, /^lever back extension$/, /^lever seated hip abduction$/, /^hyperextension \(on bench\)$/,
+  /^barbell hip thrust$/, /^barbell glute bridge$/, /^glute bridge two legs on bench/, /^cable pull through/, /^cable kickback$/, /^lever back extension$/, /^lever seated hip abduction$/, /^hyperextension \(on bench\)$/,
   // Brazos
   /^(barbell curl|dumbbell biceps curl|dumbbell hammer curl|dumbbell alternate biceps curl|cable curl|lever bicep curl|lever preacher curl|barbell preacher curl|cable preacher curl)$/,
   /^cable (pushdown|triceps pushdown \(v-bar\)|pushdown \(with rope attachment\))$/, /^barbell lying (close-grip )?triceps extension$/, /^dumbbell (seated|standing) (overhead )?triceps extension$/, /^lever seated dip$/, /^triceps dip$/, /^bench dip/,
@@ -56,7 +56,7 @@ const T0 = [
   /^(barbell|dumbbell) (incline )?bench press$/, /^lever (incline )?chest press$/, /^(pull-up|chin-up)$/, /^cable (lat )?pulldown/, /^lever front pulldown$/,
   /^cable (low |straight back )?seated row$/, /^lever (narrow grip )?seated row$/, /^barbell bent over row$/, /^dumbbell (bent over|one arm bent-over) row$/, /^lever t bar row$/,
   /^dumbbell seated shoulder press$/, /^barbell seated overhead press$/, /^lever military press$/,
-  /^(barbell full squat|dumbbell goblet squat|barbell front squat)$/, /^(sled )?(45.*)?leg press$|^lever horizontal leg press$/, /^(barbell|dumbbell) romanian deadlift$/, /^barbell deadlift$/, /^barbell glute bridge$/,
+  /^(barbell full squat|dumbbell goblet squat|barbell front squat)$/, /^(sled )?(45.*)?leg press$|^lever horizontal leg press$/, /^(barbell|dumbbell) romanian deadlift$/, /^barbell deadlift$/, /^barbell hip thrust$/, /^barbell glute bridge$/,
   /^(dumbbell|barbell) (rear )?lunge$/, /^lever (lying|seated) leg curl$/, /^lever leg extension$/, /^lever (standing|seated) calf raise$/,
   /^(barbell curl|dumbbell biceps curl|dumbbell hammer curl|cable curl)$/, /^cable (pushdown|triceps pushdown \(v-bar\))$/, /^dumbbell lateral raise$/, /^cable lateral raise$/, /^lever seated reverse fly$/, /^dumbbell rear lateral raise$/,
 ];

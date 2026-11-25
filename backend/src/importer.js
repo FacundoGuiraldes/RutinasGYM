@@ -102,7 +102,32 @@ async function importCatalog(db, records, { sedes = SEDES, log = () => {} } = {}
     log(`  importados ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
   }
 
+  await ensureCustomExercises(db);
   return { exercises: rows.length, equipment: keys.length, sedes: sedes.length };
 }
 
-module.exports = { importCatalog, toRow, validate, SEDES };
+// Ejercicios que el dataset no trae. Se clonan de un ejercicio del dataset que muestra el mismo movimiento (foto, video y pasos),
+// así que no hace falta subir material nuevo. Idempotente: no pisa nada si ya existen.
+const CUSTOM_EXERCISES = [
+  // El "puente de glúteos con barra en banco" del dataset (espalda alta apoyada en el banco) es exactamente un hip thrust.
+  { id: "custom-hip-thrust-barbell", name: "barbell hip thrust", nameEs: "Hip thrust con barra", source: "barbell glute bridge two legs on bench (male)", role: "compound", pattern: "glute_isolation", level: 1 },
+];
+
+async function ensureCustomExercises(db) {
+  let added = 0;
+  for (const c of CUSTOM_EXERCISES) {
+    const { rows } = await db.query(
+      `INSERT INTO exercises (id, name, name_es, body_part, target, muscle_group, secondary_muscles, equipment_id, extra_equipment_id,
+                              steps_es, steps_en, image_path, gif_path, attribution, media_id, role, movement_pattern, level)
+       SELECT $1, $2, $3, body_part, target, muscle_group, secondary_muscles, equipment_id, extra_equipment_id,
+              steps_es, steps_en, image_path, gif_path, attribution, media_id, $5, $6, $7
+       FROM exercises WHERE name = $4 ORDER BY id LIMIT 1
+       ON CONFLICT (id) DO NOTHING RETURNING id`,
+      [c.id, c.name, c.nameEs, c.source, c.role, c.pattern, c.level]
+    );
+    added += rows.length;
+  }
+  return added;
+}
+
+module.exports = { ensureCustomExercises, CUSTOM_EXERCISES, importCatalog, toRow, validate, SEDES };

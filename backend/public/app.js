@@ -20,9 +20,9 @@
     { v: "no_decir", t: "Prefiero no decirlo" },
   ];
   const MINUTES = [
-    { v: 45, t: "45 min", d: "Sesión corta" },
-    { v: 60, t: "60 min", d: "Lo más común" },
-    { v: 75, t: "75 min", d: "Con más volumen" },
+    { v: 45, t: "45 a 60 min", d: "Sesión corta" },
+    { v: 60, t: "60 a 75 min", d: "Lo más común" },
+    { v: 75, t: "75 a 90 min", d: "Con más volumen" },
   ];
   const ZONES = [
     { v: "pecho", t: "Pecho" },

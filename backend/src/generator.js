@@ -71,7 +71,8 @@ const BASE_COUNT = { 1: 5, 2: 6, 3: 7 }; // ejercicios por día según nivel (si
 const MAX_PER_DAY = 9;
 const MAX_PER_DAY_PRIORITY = 11; // con zonas prioritarias el día puede llevar un par más
 const SESSION_DELTA = { 45: -1, 60: 0, 75: 1 }; // minutos por sesión -> ejercicios de más o de menos
-const SESSION_MINUTES = Object.keys(SESSION_DELTA).map(Number);
+const SESSION_MINUTES = Object.keys(SESSION_DELTA).map(Number); // piso de cada rango: 45 = 45 a 60 min, 60 = 60 a 75, 75 = 75 a 90
+const SESSION_RANGE = 15;
 
 // Hipertrofia: cada músculo se entrena 2 veces por semana (lo que mejor funciona con volumen moderado).
 // Con 3 días y nivel intermedio o avanzado: superior, inferior y cuerpo completo.
@@ -122,6 +123,7 @@ function ensureFrequency(daySlots, priorities) {
   }
 }
 
+const LOWER_SLOTS = new Set(["quadC", "hingeC", "lunge", "legCurl", "legExt", "gluteI", "calf"]);
 const MAIN_LEADS = new Set(["chestC", "backV", "delC", "quadC", "hingeC", "lunge"]);
 // En cada día que entrena la zona: su ejercicio principal va primero y se suman ejercicios de volumen.
 function applyPriorities(names, priorities, level) {
@@ -291,7 +293,7 @@ function pickForSlot(pool, slot, ctx0) {
       const ranked = cands.map((e) => ({ e, r: canonRank(slot.canon, e.name) })).filter((x) => x.r !== Infinity);
       if (ranked.length) {
         const best = Math.min(...ranked.map((x) => x.r));
-        cands = ranked.filter((x) => x.r <= best + 1).map((x) => x.e);
+        cands = ranked.filter((x) => x.r <= best + (slot.canon === "gluteI" ? 0 : 1)).map((x) => x.e); // glúteos: solo el primer grupo (hip thrust, puente, pull through)
       } else if (minQ > 0 && base.some((e) => canonRank(slot.canon, e.name) !== Infinity)) {
         continue; // para sumar ejercicios de relleno: si los clásicos ya se usaron hoy, mejor no sumar que meter una rareza
       }
@@ -310,7 +312,7 @@ function pickForSlot(pool, slot, ctx0) {
     const list = fresh.length && (good(fresh) || !good(cands)) ? fresh : cands;
     return weightedPick(
       list,
-      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 1.5 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * lengthenedBoost(e, focus) * qualityWeight(e, focus),
+      (e) => equipmentWeight(e.equipment) * (e.level === effLevel ? 1.5 : 1) * (prevIds.has(e.id) ? 0.25 : 1) * (/hip thrust/i.test(e.name) ? 3 : 1) * lengthenedBoost(e, focus) * qualityWeight(e, focus),
       rng
     );
   }
@@ -340,7 +342,7 @@ function balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes
         if (!cands.length) break;
         cands[0].x.sets -= 1;
       } else if (v < min) {
-        const cands = days.flatMap((d) => d.exercises.map((x, k) => ({ d, x, k }))).filter(({ d, x }) => touches(x, region) > 0 && x.sets < maxSets(x) && estimateMinutes(d.exercises.map((y) => (y === x ? { ...y, sets: y.sets + 1 } : y))) <= sessionMinutes + 6);
+        const cands = days.flatMap((d) => d.exercises.map((x, k) => ({ d, x, k }))).filter(({ d, x }) => touches(x, region) > 0 && x.sets < maxSets(x) && estimateMinutes(d.exercises.map((y) => (y === x ? { ...y, sets: y.sets + 1 } : y))) <= sessionMinutes + SESSION_RANGE + 5); // se puede pasar unos 5 min del tope del rango
         cands.sort((a, b) => touches(b.x, region) - touches(a.x, region) || (exInfo(b.x).role === "compound") - (exInfo(a.x).role === "compound") || a.x.sets - b.x.sets || a.k - b.k);
         if (!cands.length) break;
         cands[0].x.sets += 1;
@@ -424,7 +426,7 @@ function generateOnce({ pool, member, cycleNumber = 1, prog = {}, prevIds = new 
     }
     // Ajuste al tiempo que pidió el socio: se suman ejercicios si sobra tiempo y se sacan si falta
     if (focus !== "fuerza" || true) {
-      const target = sessionMinutes;
+      const target = sessionMinutes + 7; // el rango es [sessionMinutes, sessionMinutes + 15]: se apunta al medio y se acepta ±7
       const cap = priorities.length ? MAX_PER_DAY_PRIORITY : MAX_PER_DAY;
       const extras = [...tpl.extra, ...tpl.slots];
       ctx.minQ = 3; // para completar tiempo solo entran ejercicios buenos (nunca una rareza de relleno)
@@ -438,6 +440,8 @@ function generateOnce({ pool, member, cycleNumber = 1, prog = {}, prevIds = new 
       const tgt = (x) => poolById.get(x.exerciseId)?.target;
       const timesOf = (t) => exercises.filter((x) => tgt(x) === t).length;
       const dropAt = (idx) => { dayUsed.delete(exercises[idx].exerciseId); dayUsed.delete(poolById.get(exercises[idx].exerciseId)?.name); exercises.splice(idx, 1); };
+      // con glúteos prioritarios, el hip thrust / puente del día no se recorta: es justamente lo que se pidió
+      const keep = (x) => priorities.includes("gluteos") && poolById.get(x.exerciseId)?.pattern === "glute_isolation";
       const tooLong = () => estimateMinutes(exercises) - target > 7;
       while (exercises.length > floor && tooLong()) {
         let idx = -1;
@@ -451,10 +455,10 @@ function generateOnce({ pool, member, cycleNumber = 1, prog = {}, prevIds = new 
       }
       while (exercises.length > floor && tooLong()) {
         let idx = -1;
-        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 2) idx = k;
+        for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (!keep(exercises[k]) && priorityTargets.has(tgt(exercises[k])) && timesOf(tgt(exercises[k])) > 2) idx = k;
         // un músculo que está solo una vez (ej.: el tríceps en un día de empuje) no se saca: antes se acepta pasarse unos minutos
         // Último recurso: se saca lo último del día, pero de un músculo que tenga más de un ejercicio (nunca el único: así el tríceps no desaparece de la semana)
-        if (idx === -1) for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (timesOf(tgt(exercises[k])) > 1) idx = k;
+        if (idx === -1) for (let k = exercises.length - 1; k > 0 && idx === -1; k--) if (!keep(exercises[k]) && timesOf(tgt(exercises[k])) > 1) idx = k;
         if (idx === -1) break;
         dropAt(idx);
       }
@@ -505,8 +509,13 @@ function generateOnce({ pool, member, cycleNumber = 1, prog = {}, prevIds = new 
         if ((!main || dup) && ex.role !== "cardio" && d.exercises.length > 4 && k > 0) consider(di, d.exercises.filter((_, j) => j !== k));
       });
       if (d.exercises.length < dayCap) {
+        const tplAll = [...TEMPLATES[split[di]].slots, ...TEMPLATES[split[di]].extra];
+        const allowLower = tplAll.some((n) => LOWER_SLOTS.has(n));
+        const allowUpper = tplAll.some((n) => !LOWER_SLOTS.has(n) && n !== "abs");
         for (const slotName of Object.keys(SLOTS)) {
           if (slotName === "cardio") continue;
+          // un día de tren superior no recibe ejercicios de piernas (ni al revés)
+          if (LOWER_SLOTS.has(slotName) ? !allowLower : slotName !== "abs" && !allowUpper) continue;
           const used = new Set(d.exercises.flatMap((y) => [y.exerciseId, poolById.get(y.exerciseId).name]));
           const fams = new Set(d.exercises.map((y) => familyOf(poolById.get(y.exerciseId).name)).filter(Boolean));
           const pick = pickForSlot(pool, SLOTS[slotName], { effLevel, dayUsed: used, routineUsed, prevIds, rng, focus, minQ: 3, dayFamilies: fams });
@@ -588,5 +597,6 @@ module.exports = {
   ZONE_KEYS,
   MAX_PRIORITIES,
   SESSION_MINUTES,
+  SESSION_RANGE,
   estimateMinutes,
 };
