@@ -6,6 +6,7 @@ const { mulberry32, hashString, weightedPick } = require("./util");
 const { isBlocked } = require("./limitations");
 const { staple, isJunk } = require("./staples");
 const { canonRank } = require("./canon");
+const { weeklyVolume, rangeFor, contributions, ZONE_REGIONS, REGIONS } = require("./volume");
 
 const USABLE_ROLES = new Set(["compound", "isolation", "core", "cardio"]);
 
@@ -308,6 +309,38 @@ function pickForSlot(pool, slot, ctx0) {
   return null;
 }
 
+
+// Ajuste final con la evidencia (ver volume.js): ningún músculo grande por debajo del mínimo útil de series por semana
+// ni por encima del techo. Sube o baja de a una serie, sin tocar qué ejercicios hay, y sin pasarse del tiempo pedido.
+// Techo duro: por encima de ~31 series fraccionales por semana no se detecta ventaja alguna (Pelland 2024). El resto del rango objetivo
+// es una guía: recortar series de más acortaría el día por debajo del tiempo que pidió el socio.
+const HARD_CAP = 30;
+function balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek }) {
+  const priorityRegions = new Set(priorities.flatMap((z) => ZONE_REGIONS[z] ?? []));
+  const exInfo = (x) => poolById.get(x.exerciseId);
+  const touches = (x, region) => { const e = exInfo(x); return e && e.role !== "cardio" ? (contributions(e)[region] ?? 0) : 0; };
+  const maxSets = (x) => (exInfo(x).role === "compound" ? 5 : 4);
+  const minSets = (x) => (exInfo(x).role === "compound" ? 3 : 2);
+  for (const region of REGIONS) {
+    const { min, max } = rangeFor(focus, region, { priority: priorityRegions.has(region), daysPerWeek });
+    for (let guard = 0; guard < 60; guard++) {
+      const v = weeklyVolume(days, poolById)[region];
+      if (v > Math.max(max, HARD_CAP)) {
+        // baja una serie de donde más sobra (los ejercicios de aislamiento primero, los últimos del día primero)
+        const cands = days.flatMap((d) => d.exercises.map((x, k) => ({ d, x, k }))).filter(({ x }) => touches(x, region) > 0 && x.sets > minSets(x));
+        cands.sort((a, b) => touches(a.x, region) - touches(b.x, region) || (exInfo(a.x).role === "compound") - (exInfo(b.x).role === "compound") || b.x.sets - a.x.sets || b.k - a.k);
+        if (!cands.length) break;
+        cands[0].x.sets -= 1;
+      } else if (v < min) {
+        const cands = days.flatMap((d) => d.exercises.map((x, k) => ({ d, x, k }))).filter(({ d, x }) => touches(x, region) > 0 && x.sets < maxSets(x) && estimateMinutes(d.exercises.map((y) => (y === x ? { ...y, sets: y.sets + 1 } : y))) <= sessionMinutes + 6);
+        cands.sort((a, b) => touches(b.x, region) - touches(a.x, region) || (exInfo(b.x).role === "compound") - (exInfo(a.x).role === "compound") || a.x.sets - b.x.sets || a.k - b.k);
+        if (!cands.length) break;
+        cands[0].x.sets += 1;
+      } else break;
+    }
+  }
+}
+
 /**
  * Genera las rutinas del ciclo.
  * @param pool        ejercicios disponibles en la sede (ver loadPool)
@@ -425,6 +458,9 @@ function generateRoutine({ pool, member, cycleNumber = 1, prog = {}, prevIds = n
 
     return { dayIndex: i + 1, label: `Día ${i + 1} – ${tpl.name}`, exercises, estMinutes: estimateMinutes(exercises) };
   });
+
+  balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek: member.daysPerWeek });
+  days.forEach((d) => { d.estMinutes = estimateMinutes(d.exercises); });
 
   return {
     days,

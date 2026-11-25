@@ -367,3 +367,18 @@ test("canon de programas de referentes: lo elegido sale de la lista clásica y n
   assert.ok(inCanon / total > 0.9, `en el canon: ${(inCanon / total).toFixed(2)}`);
   await db.close();
 });
+
+test("volumen semanal: sin prioridades, ningún músculo grande queda por debajo del mínimo útil ni se pasa del techo", { skip }, async () => {
+  const { weeklyVolume } = require("../src/volume");
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  for (const focus of ["hipertrofia", "general", "bajar_grasa", "fuerza"]) for (const level of [1, 2, 3]) for (const days of [3, 4, 5, 6]) for (const mins of [45, 60, 75]) {
+    const r = generateRoutine({ pool, member: { id: 7, level, daysPerWeek: days, focus, priorities: focus === "hipertrofia" ? [] : null, sessionMinutes: mins, gender: "mujer" }, cycleNumber: 1 });
+    const v = weeklyVolume(r.days, by);
+    const need = focus === "hipertrofia" && days >= 4 ? 8 : 4; // 10 series es el mínimo con claro beneficio (Schoenfeld 2017); 4 ya sirve con poco tiempo (Iversen 2021)
+    for (const k of ["pecho", "espalda", "cuadriceps", "isquios"]) assert.ok(v[k] >= need, `${focus} N${level} ${days}d ${mins}m: ${k} ${v[k]} < ${need}`);
+    for (const [k, x] of Object.entries(v)) assert.ok(x <= 32, `${focus} N${level} ${days}d ${mins}m: ${k} ${x} > 32 (sin ventaja detectable por encima, Pelland 2024)`);
+  }
+  await db.close();
+});
