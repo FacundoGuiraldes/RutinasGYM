@@ -15,6 +15,8 @@ const EQUIP_WEIGHT = {
   weighted: 1, rope: 1, "olympic barbell": 1, "trap bar": 1, "stability ball": 0.8, "medicine ball": 0.8,
   "wheel roller": 0.7, "bosu ball": 0.5, "stationary bike": 2, "elliptical machine": 2, "stepmill machine": 2,
   "skierg machine": 1.5, "upper body ergometer": 1,
+  // elementos deducidos de ejercicios de peso corporal (ver equipment.js): pesan como peso corporal
+  "pull-up bar": 2.5, "dip bars": 2.5, "bench or box": 2.5,
 };
 
 // ---------- Slots: "qué hueco hay que llenar" ----------

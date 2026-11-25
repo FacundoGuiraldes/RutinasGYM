@@ -11,6 +11,7 @@ const { replaceRoutineExercise, replaceEverywhereInSede } = require("./replace")
 const { closeDueCycles } = require("./progression");
 const { runAgent } = require("./adminAgent");
 const { FOCUSES } = require("./generator");
+const { EQUIPMENT, equipmentInfo } = require("./equipment");
 
 const ROLES = ["compound", "isolation", "core", "cardio", "mobility", "other"];
 
@@ -259,7 +260,11 @@ function createApp({
     );
     res.json(sedes.map((s) => ({
       ...s,
-      equipment: eq.filter((e) => e.sede_id === s.id).map(({ key, available }) => ({ key, available })),
+      // Solo lo que se puede marcar por sede: máquinas y elementos (el peso corporal no necesita nada)
+      equipment: eq
+        .filter((e) => e.sede_id === s.id && equipmentInfo(e.key).kind !== "none")
+        .map(({ key, available }) => ({ ...equipmentInfo(key), available }))
+        .sort((a, b) => (a.kind === b.kind ? a.label.localeCompare(b.label, "es") : a.kind === "machine" ? -1 : 1)),
       exclusions: ex.filter((e) => e.sede_id === s.id).map(({ id, name, reason }) => ({ id, name, reason })),
     })));
   }));
@@ -268,6 +273,7 @@ function createApp({
     const sedeId = int(req.params.id, "id", 1, 2 ** 31 - 1);
     const key = text(req.body.equipment, "equipment", { required: true });
     const available = Boolean(req.body.available);
+    if (EQUIPMENT[key]?.kind === "none") throw new AppError(400, "VALIDATION", "El peso corporal no necesita equipamiento: siempre está disponible");
     const { rows: eq } = await db.query("SELECT id FROM equipment WHERE key = $1", [key]);
     if (!eq[0]) throw new AppError(404, "NOT_FOUND", "Equipamiento inexistente");
     const { rowCount } = await db.query(
@@ -320,7 +326,14 @@ function createApp({
     if (req.query.target) { params.push(String(req.query.target)); where.push(`e.target = $${params.length}`); }
     if (req.query.role) { params.push(String(req.query.role)); where.push(`e.role = $${params.length}`); }
     if (req.query.equipment) { params.push(String(req.query.equipment)); where.push(`q.key = $${params.length}`); }
-    if (req.query.enabled === "0" || req.query.enabled === "1") { params.push(req.query.enabled === "1"); where.push(`e.enabled = $${params.length}`); }
+    // needs = none | machine | implement: filtra por tipo de equipamiento que necesita el ejercicio
+    if (["none", "machine", "implement"].includes(req.query.needs)) {
+      const kind = req.query.needs;
+      // "elemento" = todo lo que no es "none" ni "machine" (incluye claves nuevas desconocidas)
+      const keys = Object.keys(EQUIPMENT).filter((k) => (kind === "implement" ? EQUIPMENT[k].kind !== "none" && EQUIPMENT[k].kind !== "machine" : EQUIPMENT[k].kind === kind));
+      const marks = keys.map((k) => { params.push(k); return `$${params.length}`; });
+      where.push(`q.key ${kind === "implement" ? "IN" : "IN"} (${marks.join(",")})`);
+    }
     const page = Math.max(1, Number(req.query.page) || 1);
     const size = 40;
     const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -332,13 +345,13 @@ function createApp({
        ORDER BY e.name, e.id LIMIT ${size} OFFSET ${(page - 1) * size}`,
       params
     );
-    res.json({ total: total[0].n, page, pageSize: size, items: rows.map((r) => ({ ...r, imageUrl: `${mediaBase.replace(/\/$/, "")}/${r.image_path}` })) });
+    res.json({ total: total[0].n, page, pageSize: size, items: rows.map((r) => ({ ...r, equipmentLabel: equipmentInfo(r.equipment).label, needs: equipmentInfo(r.equipment).kind, imageUrl: `${mediaBase.replace(/\/$/, "")}/${r.image_path}` })) });
   }));
 
   admin.get("/exercise-facets", h(async (req, res) => {
     const { rows: t } = await db.query("SELECT DISTINCT target FROM exercises ORDER BY target");
     const { rows: q } = await db.query("SELECT key FROM equipment ORDER BY key");
-    res.json({ targets: t.map((x) => x.target), equipment: q.map((x) => x.key), roles: ROLES });
+    res.json({ targets: t.map((x) => x.target), equipment: q.map((x) => equipmentInfo(x.key)), roles: ROLES });
   }));
 
   admin.patch("/exercises/:id", h(async (req, res) => {

@@ -1,6 +1,7 @@
 // Servicio de rutinas: crear el ciclo de un socio en la base y armar la vista que ve la app.
 
 const { generateRoutine, loadPool, DEFAULT_PROG } = require("./generator");
+const { equipmentInfo } = require("./equipment");
 const { localDate, addDays, weekStart } = require("./util");
 const { AppError } = require("./errors");
 
@@ -159,6 +160,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
               name: x.name,
               target: x.target,
               equipment: x.equipment,
+              equipmentLabel: equipmentInfo(x.equipment).label,
               secondary: x.secondary_muscles ?? [],
               steps: x.steps_es ?? [],
               gifUrl: mediaUrl(mediaBase, x.gif_path),

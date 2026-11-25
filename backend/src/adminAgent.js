@@ -3,6 +3,7 @@
 // sus argumentos contra la base. La "memoria" del agente es la tabla sede_exclusions /
 // sede_equipment: una regla guardada ahí se respeta SIEMPRE, no depende de que la IA se acuerde.
 
+const { equipmentInfo, EQUIPMENT } = require("./equipment");
 const { AppError } = require("./errors");
 const { normalize } = require("./util");
 const { replaceRoutineExercise, replaceEverywhereInSede } = require("./replace");
@@ -271,8 +272,13 @@ function makeExecutors(db, ai) {
     async set_equipment_availability({ sede, equipment, available, apply_to_active_routines = true }) {
       const s = await findSede(db, sede);
       const { rows: all } = await db.query("SELECT id, key FROM equipment ORDER BY key");
-      const hit = all.find((e) => e.key === equipment) ?? all.find((e) => normalize(e.key) === normalize(equipment));
-      if (!hit) throw new AppError(400, "EQUIPMENT", `No existe ese equipamiento. Opciones: ${all.map((e) => e.key).join(", ")}`);
+      // Acepta la clave del dataset ("smith machine") o el nombre en español ("Máquina Smith")
+      const q = normalize(equipment);
+      const hit =
+        all.find((e) => e.key === equipment) ??
+        all.find((e) => normalize(e.key) === q || normalize(equipmentInfo(e.key).label) === q);
+      if (!hit) throw new AppError(400, "EQUIPMENT", `No existe ese equipamiento. Opciones: ${all.map((e) => `${e.key} (${equipmentInfo(e.key).label})`).join(", ")}`);
+      if (EQUIPMENT[hit.key]?.kind === "none") throw new AppError(400, "EQUIPMENT", "El peso corporal no necesita equipamiento: está siempre disponible. Para sacar un ejercicio puntual usá exclude_exercise_in_sede.");
       await db.query(
         `INSERT INTO sede_equipment (sede_id, equipment_id, available) VALUES ($1, $2, $3)
          ON CONFLICT (sede_id, equipment_id) DO UPDATE SET available = EXCLUDED.available`,
@@ -300,7 +306,7 @@ function makeExecutors(db, ai) {
         `SELECT e.id, e.name, x.reason FROM sede_exclusions x JOIN exercises e ON e.id = x.exercise_id WHERE x.sede_id = $1 ORDER BY e.name`,
         [s.id]
       );
-      return { sede: s.nombre, equipmentUnavailable: eq.map((e) => e.key), excludedExercises: ex };
+      return { sede: s.nombre, equipmentUnavailable: eq.map((e) => `${e.key} (${equipmentInfo(e.key).label})`), excludedExercises: ex };
     },
 
     async remove_sede_exclusion({ sede, exercise_id }) {

@@ -167,7 +167,7 @@
       img,
       h("div", { class: "grow" },
         h("div", { class: "ex-name", text: ex.name }),
-        h("div", { class: "ex-meta", text: `${cap(ex.target)} · ${ex.equipment}${e.replaced ? " · cambiado" : ""}` }),
+        h("div", { class: "ex-meta", text: `${cap(ex.target)} · ${ex.equipmentLabel || ex.equipment}${e.replaced ? " · cambiado" : ""}` }),
         h("div", { class: "ex-dose", text: dose }),
         e.note ? h("div", { class: "ex-note", text: e.note }) : null,
         h("div", { class: "ex-actions" },

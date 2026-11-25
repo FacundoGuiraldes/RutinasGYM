@@ -3,6 +3,7 @@
 // exclusiones). Sirve igual para PGlite (tests) que para Postgres real.
 
 const { classifyExercise } = require("./classify");
+const { effectiveEquipment } = require("./equipment");
 
 const SEDES = ["Martínez", "Olivos"];
 const BATCH = 200;
@@ -19,7 +20,7 @@ function toRow(raw, equipmentIdByKey) {
     target: raw.target,
     muscle_group: raw.muscle_group ?? null,
     secondary_muscles: raw.secondary_muscles ?? [],
-    equipment_id: equipmentIdByKey.get(raw.equipment),
+    equipment_id: equipmentIdByKey.get(effectiveEquipment(raw)),
     steps_es: stepsEs,
     steps_en: stepsEn,
     image_path: raw.image,
@@ -54,7 +55,7 @@ async function importCatalog(db, records, { sedes = SEDES, log = () => {} } = {}
   for (const nombre of sedes) {
     await db.query("INSERT INTO sedes (nombre) VALUES ($1) ON CONFLICT (nombre) DO NOTHING", [nombre]);
   }
-  const keys = [...new Set(records.map((r) => r.equipment))].sort();
+  const keys = [...new Set(records.map(effectiveEquipment))].sort();
   for (const key of keys) {
     await db.query("INSERT INTO equipment (key) VALUES ($1) ON CONFLICT (key) DO NOTHING", [key]);
   }

@@ -177,7 +177,7 @@
         h("img", { class: "ex-thumb", src: e.exercise.imageUrl, alt: "", loading: "lazy", style: "width:56px;height:56px" }),
         h("div", { class: "grow" },
           h("div", { class: "ex-name", text: e.exercise.name }),
-          h("div", { class: "ex-meta", text: `${e.sets} × ${e.reps} · ${cap(e.exercise.target)} · ${e.exercise.equipment}${e.replaced ? " · cambiado" : ""}` }),
+          h("div", { class: "ex-meta", text: `${e.sets} × ${e.reps} · ${cap(e.exercise.target)} · ${e.exercise.equipmentLabel || e.exercise.equipment}${e.replaced ? " · cambiado" : ""}` }),
           h("div", { class: "ex-actions" },
             h("button", { class: "small", text: "Cambiar", onclick: rep(e) }),
             h("button", { class: "small danger", text: "No hay en la sede", onclick: rep(e, { exclude: true }) }))));
@@ -214,14 +214,17 @@
   function viewSedes(root) {
     root.append(h("p", { class: "muted", text: "Lo que desmarques acá no se le asigna a nadie de esa sede, ni en rutinas nuevas ni en los reemplazos. Al desmarcar equipamiento o excluir un ejercicio, las rutinas activas se corrigen solas." }));
     for (const s of sedes) {
-      const boxes = s.equipment.map((e) => h("label", {}, h("input", { type: "checkbox", checked: e.available, onchange: async (ev) => {
-        const box = ev.target;
-        const r = await attempt(() => api("PUT", `/api/admin/sedes/${s.id}/equipment`, { equipment: e.key, available: box.checked }));
-        if (!r) { box.checked = !box.checked; return; }
-        toast(box.checked ? `${s.nombre}: ${e.key} disponible` : `${s.nombre}: sin ${e.key}. Rutinas corregidas: ${r.replaced}`);
-        e.available = box.checked;
-      } }), " ", e.key));
-      root.append(h("div", { class: "card stack" }, h("h2", { style: "margin:0", text: `Sede ${s.nombre}` }), h("h3", { text: "Equipamiento disponible" }), h("div", { class: "toggle-list" }, ...boxes),
+      const box = (e) => h("label", {}, h("input", { type: "checkbox", checked: e.available, onchange: async (ev) => {
+        const cb = ev.target;
+        const r = await attempt(() => api("PUT", `/api/admin/sedes/${s.id}/equipment`, { equipment: e.key, available: cb.checked }));
+        if (!r) { cb.checked = !cb.checked; return; }
+        toast(cb.checked ? `${s.nombre}: ${e.label} disponible` : `${s.nombre}: sin ${e.label}. Rutinas corregidas: ${r.replaced}`);
+        e.available = cb.checked;
+      } }), " ", e.label);
+      const group = (title, kind) => [h("h3", { text: title }), h("div", { class: "toggle-list" }, ...s.equipment.filter((e) => e.kind === kind).map(box))];
+      root.append(h("div", { class: "card stack" }, h("h2", { style: "margin:0", text: `Sede ${s.nombre}` }),
+        ...group("Máquinas (marcá las que hay)", "machine"), ...group("Elementos (marcá los que hay)", "implement"),
+        h("p", { class: "muted small", text: "Los ejercicios de peso corporal sin elementos no necesitan nada: están siempre disponibles." }),
         h("h3", { text: "Ejercicios excluidos" }),
         s.exclusions.length ? h("div", {}, ...s.exclusions.map((x) => h("div", { class: "row spread", style: "padding:6px 0;border-top:1px solid var(--line)" }, h("div", { class: "grow" }, h("b", { text: cap(x.name) }), x.reason ? h("span", { class: "muted small", text: ` · ${x.reason}` }) : null), h("button", { class: "small ghost", text: "Quitar", onclick: async () => { await attempt(() => api("DELETE", `/api/admin/sedes/${s.id}/exclusions/${x.id}`)); sedes = await api("GET", "/api/admin/sedes"); boot(); } })))) : h("p", { class: "muted", text: "Ninguno." }),
         h("p", { class: "muted small", text: "Para excluir un ejercicio puntual: buscalo en el Catálogo, o decile al Agente IA “en Olivos no tenemos la máquina X”." })));
@@ -236,11 +239,12 @@
     const q = h("input", { type: "search", placeholder: "Buscar ejercicio (en inglés)…" });
     const target = select([{ v: "", t: "Todos los músculos" }, ...facets.targets.map((t) => ({ v: t, t }))], "");
     const role = select([{ v: "", t: "Todos los roles" }, ...facets.roles.map((t) => ({ v: t, t }))], "");
+    const needs = select([{ v: "", t: "Cualquier equipamiento" }, { v: "none", t: "No necesitan nada" }, { v: "machine", t: "Necesitan máquina" }, { v: "implement", t: "Necesitan elemento" }], "");
     const enabled = select([{ v: "", t: "Habilitados y no" }, { v: "1", t: "Solo habilitados" }, { v: "0", t: "Solo deshabilitados" }], "");
     const out = h("div");
     let page = 1;
     const load = async () => {
-      const qs = new URLSearchParams({ q: q.value, target: target.value, role: role.value, enabled: enabled.value, page });
+      const qs = new URLSearchParams({ q: q.value, target: target.value, role: role.value, needs: needs.value, enabled: enabled.value, page });
       const r = await attempt(() => api("GET", `/api/admin/exercises?${qs}`));
       if (!r) return;
       const patch = (id, body, okMsg) => attempt(async () => { await api("PATCH", `/api/admin/exercises/${id}`, body); toast(okMsg); });
@@ -274,8 +278,12 @@
           " Habilitado");
         const info = h("div", {},
           h("b", { text: cap(e.name) }),
-          h("div", { class: "muted small", text: `${cap(e.target)} · ${e.equipment} · ${e.pattern}${e.classified_by === "admin" ? " · corregido por vos" : ""}` }));
-        const controls = h("div", { class: "row wrap" }, roleSel, levelSel, enabledBox, ...sedes.map((s) => excludeButton(e, s)));
+          h("div", { class: "muted small", text: `${cap(e.target)} · ${e.equipmentLabel} · ${e.pattern}${e.classified_by === "admin" ? " · corregido por vos" : ""}` }));
+        // Si no necesita equipamiento no tiene sentido marcar "no hay en la sede"
+        const sedeButtons = e.needs === "none"
+          ? [h("span", { class: "pill ok", text: "No necesita equipamiento" })]
+          : sedes.map((s) => excludeButton(e, s));
+        const controls = h("div", { class: "row wrap" }, roleSel, levelSel, enabledBox, ...sedeButtons);
         return h("div", { class: "card row", style: "align-items:flex-start" },
           h("img", { class: "ex-thumb", src: e.imageUrl, alt: "", loading: "lazy", style: "width:64px;height:64px" }),
           h("div", { class: "grow stack" }, info, controls));
@@ -292,8 +300,8 @@
     };
     let t;
     const reset = () => { clearTimeout(t); t = setTimeout(() => { page = 1; load(); }, 250); };
-    [q, target, role, enabled].forEach((el) => el.addEventListener(el === q ? "input" : "change", reset));
-    root.append(h("p", { class: "muted", text: "Acá hacés tu limpieza: deshabilitá lo que no quieras ofrecer y corregí rol y nivel. Lo que corrijas no se pisa al reimportar el catálogo." }), h("div", { class: "stack" }, q, h("div", { class: "row wrap" }, target, role, enabled)), out);
+    [q, target, role, needs, enabled].forEach((el) => el.addEventListener(el === q ? "input" : "change", reset));
+    root.append(h("p", { class: "muted", text: "Acá hacés tu limpieza: deshabilitá lo que no quieras ofrecer y corregí rol y nivel. Lo que corrijas no se pisa al reimportar el catálogo." }), h("div", { class: "stack" }, q, h("div", { class: "row wrap" }, target, role, needs, enabled)), out);
     load();
   }
 
@@ -338,7 +346,7 @@
       if (c.action === "onboarding_notes") return `Notas al registrarse: “${p.notes}”`;
       if (c.action === "monthly_progression") return `Mes ${p.cycle}: ${p.adherencePct}% → ${p.decision}`;
       if (c.action === "exclude_exercise") return `Excluido: ${(p.names ?? []).join(", ") || p.exerciseId}${p.reason ? ` (${p.reason})` : ""}`;
-      if (c.action === "set_equipment") return `${p.equipment}: ${p.available ? "disponible" : "no disponible"}`;
+      if (c.action === "set_equipment") return `${(sedes[0]?.equipment.find((q) => q.key === p.equipment)?.label) ?? p.equipment}: ${p.available ? "disponible" : "no disponible"}`;
       return c.action;
     };
     const row = (c, withBtn) => h("div", { class: "ex" }, h("div", { class: "grow" }, h("b", { text: `${c.member ?? c.sede ?? "—"}` }), h("span", { class: "muted small", text: ` · ${c.actor} · ${fmtDate(c.created_at)}` }), h("div", { text: describe(c) })),

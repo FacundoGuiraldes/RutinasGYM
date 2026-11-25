@@ -486,3 +486,27 @@ test("cron manual: /cycles/run cierra los ciclos vencidos", { skip }, async () =
   assert.equal(detail.history[0].decision, "SIMPLIFY");
   await t.close();
 });
+
+test("equipamiento en español: máquinas y elementos por sede, peso corporal siempre disponible", { skip }, async () => {
+  const t = await setup();
+  const sedes = (await t.adminApi("GET", "/api/admin/sedes")).json;
+  const eq = sedes[0].equipment;
+  assert.ok(eq.length > 10);
+  assert.ok(eq.every((e) => e.label && ["machine", "implement"].includes(e.kind)), "todo con nombre y tipo");
+  assert.ok(!eq.some((e) => e.key === "body weight" || e.key === "assisted"), "peso corporal no se marca por sede");
+  assert.equal(eq.find((e) => e.key === "smith machine").label, "Máquina Smith");
+  assert.equal(eq.find((e) => e.key === "pull-up bar").kind, "implement");
+  // No se puede "sacar" el peso corporal
+  assert.equal((await t.adminApi("PUT", "/api/admin/sedes/1/equipment", { equipment: "body weight", available: false })).status, 400);
+  // Catálogo: filtro por lo que necesitan y etiqueta en español
+  const none = (await t.adminApi("GET", "/api/admin/exercises?needs=none")).json;
+  assert.ok(none.total > 200 && none.items.every((x) => x.needs === "none"));
+  const mach = (await t.adminApi("GET", "/api/admin/exercises?needs=machine&q=smith")).json;
+  assert.ok(mach.items.length && mach.items.every((x) => x.needs === "machine" && x.equipmentLabel));
+  // Sin barra de dominadas en Olivos, la rutina del socio no la usa
+  await t.adminApi("PUT", "/api/admin/sedes/2/equipment", { equipment: "pull-up bar", available: false });
+  const m = await t.createMember({ nombre: "Ines", sedeId: 2, level: 2, daysPerWeek: 4, focus: "general" });
+  const v = (await t.call("GET", "/api/me", { token: m.token })).json;
+  assert.ok(!ALL_EX(v).some((x) => x.exercise.equipment === "pull-up bar"));
+  await t.close();
+});
