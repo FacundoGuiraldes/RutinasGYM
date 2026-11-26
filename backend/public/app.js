@@ -200,7 +200,7 @@
   }
 
   function renderOnboarding(view) {
-    const sel = { level: { value: null }, days: { value: null }, focus: { value: null }, gender: { value: null }, minutes: { value: 60 } };
+    const sel = { level: { value: null }, days: { value: null }, focus: { value: null }, gender: { value: null }, minutes: { value: 60 }, sport: { value: "ninguno" }, sportDays: { value: 2 } };
     const zones = [];
     const notes = h("textarea", { id: "notes", maxlength: "500", placeholder: "Ej: operación de rodilla, dolor lumbar… (lo ve tu profe)" });
     const go = h("button", { class: "primary full", disabled: true, type: "button", text: "Armar mi rutina", style: "margin-top:22px" });
@@ -211,6 +211,15 @@
       h("div", { class: "q", text: "¿Qué querés priorizar?" }),
       h("p", { class: "muted small", style: "margin-bottom:10px", text: "Elegí hasta 2 zonas. Van primero en cada sesión, con más series y 2 veces por semana como mínimo." }),
       zonePicker(zones));
+    // Otro deporte: la rutina baja el volumen de lo que ese deporte ya cansa. Los días solo aparecen si elige uno.
+    const SPORTS = [
+      { v: "ninguno", t: "Ninguno" }, { v: "futbol", t: "Fútbol" }, { v: "running", t: "Running" }, { v: "ciclismo", t: "Ciclismo" },
+      { v: "natacion", t: "Natación" }, { v: "tenis_padel", t: "Tenis o pádel" }, { v: "artes_marciales", t: "Artes marciales o boxeo" }, { v: "otro", t: "Otro" },
+    ];
+    const sportDaysBlock = h("div", { hidden: true },
+      h("div", { class: "q", text: "¿Cuántas veces por semana?" }),
+      choiceGroup("Veces por semana", [1, 2, 3, 4, 5].map((d) => ({ v: d, t: d, d: null })), sel.sportDays, null, true));
+    const onSport = () => { sportDaysBlock.hidden = sel.sport.value === "ninguno"; };
     const onFocus = () => { zoneBlock.hidden = sel.focus.value !== "hipertrofia"; check(); };
 
     const form = [
@@ -224,6 +233,9 @@
       h("div", { class: "q", text: "¿Cuál es tu género?" }),
       h("p", { class: "muted small", style: "margin-bottom:10px", text: "Solo lo usamos para sugerir qué zonas reforzar cuando no elegís ninguna. Podés cambiarlas igual." }),
       choiceGroup("Género", GENDERS, sel.gender, check, "words"),
+      h("div", { class: "q", text: "¿Hacés otra actividad deportiva?" }),
+      h("p", { class: "muted small", style: "margin-bottom:10px", text: "Si ya entrenás fútbol, running u otro deporte, ajustamos la rutina para que llegues a recuperarte." }),
+      choiceGroup("Otro deporte", SPORTS, sel.sport, onSport, "words"), sportDaysBlock,
       h("label", { for: "notes", text: "¿Alguna lesión o limitación? (opcional)" }), notes,
       go,
     ];
@@ -234,6 +246,7 @@
       try {
         const body = { level: sel.level.value, daysPerWeek: sel.days.value, focus: sel.focus.value, notes: notes.value, sessionMinutes: sel.minutes.value };
         if (sel.gender.value !== "no_decir") body.gender = sel.gender.value;
+        if (sel.sport.value !== "ninguno") { body.otherSport = sel.sport.value; body.otherSportDays = sel.sportDays.value; }
         if (sel.focus.value === "hipertrofia") body.priorities = [...zones]; // [] = parejo
         state = await api("POST", "/api/me/onboarding", body);
         await sleep(Math.max(0, 1600 - (Date.now() - t0))); // que se llegue a ver cómo se carga la barra
@@ -298,7 +311,7 @@
     const dock = h("div", { class: "dock" }, cta);
 
     $app.removeAttribute("aria-busy");
-    $app.replaceChildren(...[header, deloadBanner, dayTabs, dayCard, limitationsCard(view), h("p", { class: "muted small tip", text: "Tildá cada ejercicio al terminarlo y cerrá el día con el botón de abajo: así tu rutina del mes que viene se ajusta a cómo venís." }), h("footer", { class: "attr", text: view.attribution }), dock].filter(Boolean));
+    $app.replaceChildren(...[header, deloadBanner, dayTabs, dayCard, limitationsCard(view), routine.explanation ? h("button", { class: "ghost", type: "button", text: "¿Por qué esta rutina?", onclick: () => renderExplanation(routine) }) : null, h("p", { class: "muted small tip", text: "Tildá cada ejercicio al terminarlo y cerrá el día con el botón de abajo: así tu rutina del mes que viene se ajusta a cómo venís." }), h("footer", { class: "attr", text: view.attribution }), dock].filter(Boolean));
     dayTabs.querySelector("[aria-current]")?.scrollIntoView({ inline: "center", block: "nearest" });
   }
 
@@ -468,10 +481,36 @@
 
   // ---------- Arranque ----------
 
+  // ---------- Explicación de la rutina ----------
+  // Pantalla completa con la lógica de ESTA rutina. Aparece una vez cuando se crea y después queda en "¿Por qué esta rutina?".
+  const seenKey = (routine) => `rg-explained-${routine.id}`;
+  function wasExplained(routine) { try { return localStorage.getItem(seenKey(routine)) === "1"; } catch { return true; } }
+  function renderExplanation(routine, { first = false } = {}) {
+    const ex = routine.explanation;
+    const close = () => { try { localStorage.setItem(seenKey(routine), "1"); } catch { /* sin almacenamiento */ } window.scrollTo({ top: 0 }); render(); };
+    const sections = ex.sections.map((s, i) => h("section", { class: "why-sec", style: `--i:${i}` },
+      h("h2", { text: s.title }),
+      h("p", { text: s.body }),
+      s.items ? h("ul", { class: "why-list" }, ...s.items.map((t) => h("li", { text: t }))) : null,
+      s.volume ? h("div", { class: "why-vol" }, ...s.volume.map((v) => h("div", { class: "why-row" },
+        h("span", { text: v.label + (v.priority ? " (prioridad)" : "") }),
+        h("i", { style: `--w:${Math.min(100, Math.round((v.sets / 24) * 100))}%` }),
+        h("b", { text: String(v.sets) })))) : null));
+    $app.removeAttribute("aria-busy");
+    $app.replaceChildren(
+      h("div", { class: "why" },
+        h("h1", { text: first ? "Tu rutina está lista" : ex.title }),
+        h("p", { class: "muted", text: first ? "Antes de empezar, mirá cómo la armamos y por qué." : "Esto es lo que tuvimos en cuenta." }),
+        ...sections),
+      h("div", { class: "dock" }, h("button", { class: "primary", type: "button", text: first ? "Entendido, ver mi rutina" : "Volver a mi rutina", onclick: close })));
+    window.scrollTo({ top: 0 });
+  }
+
   function render() {
     if (!state) return;
     if (!state.member.onboarded) return renderOnboarding(state);
     if (!state.routine) return renderMessage("Estamos armando tu rutina", "Todavía no tenés una rutina activa. Consultá con tu profe.");
+    if (state.routine.explanation && !wasExplained(state.routine)) return renderExplanation(state.routine, { first: true });
     renderRoutine(state);
   }
 

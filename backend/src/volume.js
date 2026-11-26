@@ -36,6 +36,8 @@ const REGIONS = ["pecho", "espalda", "hombros", "biceps", "triceps", "cuadriceps
 // Las regiones chicas llegan a lo suyo con menos series (los tres compuestos ya las trabajan de forma indirecta)
 const SMALL = new Set(["biceps", "triceps", "gemelos", "hombros"]);
 
+const { loadFactor } = require("./sports");
+
 const TARGETS = {
   hipertrofia: { min: 10, max: 22, minSmall: 8, maxPriority: 26 },
   general: { min: 6, max: 14, minSmall: 4, maxPriority: 14 },
@@ -60,13 +62,15 @@ function weeklyVolume(days, poolById) {
 
 // Con 2 o 3 días por semana no hay tiempo físico para llegar al mínimo de 10 series por músculo: se baja al mínimo
 // que la evidencia ya considera útil (4 o más series, Iversen 2021) y los gemelos solo se exigen con 5 o más días.
-function rangeFor(focus, region, { priority = false, daysPerWeek = 4 } = {}) {
+function rangeFor(focus, region, { priority = false, daysPerWeek = 4, sport = null, sportDays = 0 } = {}) {
   const t = TARGETS[focus] ?? TARGETS.general;
   let min = SMALL.has(region) ? t.minSmall : t.min;
   if (daysPerWeek <= 3) min = Math.max(4, Math.round(min * 0.6));
   if (region === "gemelos") min = daysPerWeek >= 5 ? Math.min(min, 6) : 0;
   if (priority && daysPerWeek >= 3) min += 2; // una zona prioritaria no se conforma con el mínimo: +2 series
-  return { min, max: priority ? t.maxPriority : t.max };
+  const f = loadFactor(sport, sportDays, region); // otro deporte: baja el volumen de lo que ya castiga
+  if (f < 1 && min > 0) min = Math.max(3, Math.round(min * f));
+  return { min, max: Math.round((priority ? t.maxPriority : t.max) * f) };
 }
 
 // Qué regiones cuentan como cada zona prioritaria

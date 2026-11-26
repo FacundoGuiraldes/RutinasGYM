@@ -347,3 +347,17 @@ dialog.sheet button[data-close] { min-height: 40px; }
 .week-count { font-size: clamp(3.4rem, 16vw, 4.8rem); }
 .month { margin-top: 10px; }
 p.tip { margin: 16px 4px 0; }
+
+/* ---------- Pantalla "Así armamos tu rutina" ---------- */
+.why { padding-bottom: 96px; }
+.why h1 { margin-bottom: 4px; }
+.why-sec { margin-top: 22px; animation: why-in .35s ease both; animation-delay: calc(var(--i) * 40ms); }
+.why-sec h2 { font-size: 1.05rem; margin-bottom: 6px; }
+.why-sec p { line-height: 1.5; }
+.why-list { margin: 8px 0 0; padding-left: 18px; line-height: 1.6; }
+.why-vol { display: grid; gap: 8px; margin-top: 10px; }
+.why-row { display: grid; grid-template-columns: 110px 1fr 28px; align-items: center; gap: 10px; font-size: .9rem; }
+.why-row i { display: block; height: 8px; border-radius: 4px; background: linear-gradient(90deg, currentColor var(--w), rgba(127,127,127,.2) var(--w)); opacity: .85; }
+.why-row b { text-align: right; }
+@keyframes why-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .why-sec { animation: none; } }

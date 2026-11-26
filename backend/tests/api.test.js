@@ -116,6 +116,10 @@ test("onboarding: el socio elige nivel, días y enfoque y recibe su rutina", { s
   assert.match(ex.exercise.gifUrl, /^\/media\/videos\/.+\.gif$/);
   assert.ok(ex.exercise.steps.length > 0);
   assert.equal(ok.json.progress.cycle.planned, 16);
+  // La rutina trae su explicación, y las notas sobre la rodilla se reflejan en "Tus cuidados"
+  const exp = ok.json.routine.explanation;
+  assert.ok(exp && exp.sections.length >= 6, "explicación presente");
+  assert.match(exp.sections.find((x) => x.title === "Tus cuidados y notas").body, /rodilla/i);
 
   assert.equal((await t.call("POST", "/api/me/onboarding", { token: m.token, body: { level: 1, daysPerWeek: 2, focus: "general" } })).status, 409);
   // Las notas del socio quedan marcadas para que las revise el profe
@@ -635,5 +639,18 @@ test("respaldo: descarga todo lo que no se puede regenerar y exige clave", { ski
   assert.ok(r.json.tables.members.some((m) => m.nombre === "Para respaldo"));
   assert.ok(r.json.tables.sedes.length === 2 && r.json.tables.sede_equipment.length > 10);
   assert.ok(!("exercises" in r.json.tables), "el catálogo se reimporta solo");
+  await t.close();
+});
+
+test("onboarding: el otro deporte se guarda, se valida y aparece en la explicación", { skip }, async () => {
+  const t = await setup();
+  const m = await t.createMember({ nombre: "Lola", sedeId: 1 });
+  assert.equal((await t.call("POST", "/api/me/onboarding", { token: m.token, body: { level: 2, daysPerWeek: 3, focus: "general", otherSport: "quidditch", otherSportDays: 2 } })).status, 400);
+  assert.equal((await t.call("POST", "/api/me/onboarding", { token: m.token, body: { level: 2, daysPerWeek: 3, focus: "general", otherSport: "futbol", otherSportDays: 9 } })).status, 400);
+  const ok = await t.call("POST", "/api/me/onboarding", { token: m.token, body: { level: 2, daysPerWeek: 3, focus: "general", otherSport: "futbol", otherSportDays: 2 } });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.json.member.otherSport, "futbol");
+  assert.equal(ok.json.member.otherSportDays, 2);
+  assert.ok(ok.json.routine.explanation.sections.some((x) => x.title === "Tu otra actividad"));
   await t.close();
 });

@@ -165,6 +165,8 @@ CREATE INDEX IF NOT EXISTS exercises_extra_equipment_idx ON exercises (extra_equ
 -- Datos para planificar mejor la rutina (se piden en el onboarding)
 ALTER TABLE members ADD COLUMN IF NOT EXISTS gender TEXT;                         -- mujer | hombre | otro
 ALTER TABLE members ADD COLUMN IF NOT EXISTS priorities JSONB;                    -- zonas a priorizar en hipertrofia; NULL = no se preguntó, [] = parejo
+ALTER TABLE members ADD COLUMN IF NOT EXISTS other_sport TEXT;                  -- otro deporte que practica (clave de sports.js)
+ALTER TABLE members ADD COLUMN IF NOT EXISTS other_sport_days INT;              -- cuántas veces por semana
 ALTER TABLE members ADD COLUMN IF NOT EXISTS session_minutes INT;                 -- 45 | 60 | 75
 
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS name_es TEXT;

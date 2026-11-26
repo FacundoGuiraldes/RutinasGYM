@@ -2,6 +2,7 @@
 
 const { generateRoutine, loadPool, DEFAULT_PROG, estimateMinutes } = require("./generator");
 const { areaLabels } = require("./limitations");
+const { explainRoutine } = require("./explain");
 const { equipmentInfo, targetLabel } = require("./equipment");
 const { translateName } = require("./namesEs");
 const { localDate, addDays, weekStart } = require("./util");
@@ -18,6 +19,7 @@ async function createRoutine(db, member, { cycleNumber, prog = DEFAULT_PROG, pre
     member: {
       id: member.id, level: member.level, daysPerWeek: member.days_per_week, focus: member.focus,
       gender: member.gender, priorities: member.priorities, sessionMinutes: member.session_minutes,
+      otherSport: member.other_sport ?? null, otherSportDays: member.other_sport_days ?? 0,
     },
     cycleNumber,
     prog,
@@ -27,6 +29,9 @@ async function createRoutine(db, member, { cycleNumber, prog = DEFAULT_PROG, pre
   // Control de calidad (quality.js): se guarda con la rutina para que el profe vea si quedó alguna falla sin resolver
   gen.params.quality = { ok: gen.quality.ok, score: gen.quality.score, attempts: gen.quality.attempts, blockers: gen.quality.blockers.map((b) => b.msg), warnings: gen.quality.warnings.map((w) => w.msg).slice(0, 8) };
   if (!gen.quality.ok) gen.warnings.push(...gen.quality.blockers.map((b) => `Control de calidad: ${b.msg}`));
+
+  // Explicación de la lógica para el socio (pantalla "Así armamos tu rutina")
+  gen.params.explanation = explainRoutine({ params: gen.params, days: gen.days, poolById: new Map(pool.map((e) => [e.id, e])), member: { limitations: member.limitations, notes: member.notes } });
 
   const total = gen.days.reduce((a, d) => a + d.exercises.length, 0);
   if (total === 0) {
@@ -110,6 +115,8 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       gender: member.gender ?? null,
       priorities: member.priorities ?? null,
       sessionMinutes: member.session_minutes ?? null,
+      otherSport: member.other_sport ?? null,
+      otherSportDays: member.other_sport_days ?? 0,
       limitations: areaLabels(member.limitations),
     },
     routine: null,
@@ -169,6 +176,7 @@ async function buildMemberView(db, member, { mediaBase = "/media", today = local
       endsOn: routine.ends_on,
       priorities: routine.params?.priorities ?? [],
       quality: routine.params?.quality ?? null,
+      explanation: routine.params?.explanation ?? null,
       weekOfCycle: weekOfCycle(routine.starts_on, today),
       deload,
       deloadNote: deload ? DELOAD_NOTE : null,

@@ -115,7 +115,7 @@ function evaluateRoutine({ days, poolById, member, params }) {
   }
   for (const r of REGIONS) {
     const prio = priorityRegions.has(r);
-    const { min, max } = rangeFor(focus, r, { priority: prio, daysPerWeek });
+    const { min, max } = rangeFor(focus, r, { priority: prio, daysPerWeek, sport: params.otherSport, sportDays: params.otherSportDays });
     const v = vol[r];
     // Bajo el mínimo ideal pero cerca (hasta 20% menos, 10% en zonas prioritarias) es una observación; más abajo, una falla.
     // Con 2 días por semana el mínimo que se exige es el de Iversen 2021 (4 series): no hay tiempo físico para más.

@@ -9,6 +9,7 @@ const { randomToken, safeEqual, localDate, weekStart, addDays } = require("./uti
 const { createRoutine, getActiveRoutine, buildMemberView, WEEKS_PER_CYCLE } = require("./routines");
 const { replaceRoutineExercise, replaceEverywhereInSede } = require("./replace");
 const { closeDueCycles } = require("./progression");
+const { SPORT_KEYS } = require("./sports");
 const { interpretLimitations, interpretByWords, isBlocked, areaLabels } = require("./limitations");
 const { runAgent } = require("./adminAgent");
 const { FOCUSES, ZONE_KEYS, MAX_PRIORITIES, SESSION_MINUTES } = require("./generator");
@@ -31,7 +32,11 @@ function parseProfile(body, focus, fallback = {}) {
     if (new Set(priorities).size > MAX_PRIORITIES) throw new AppError(400, "VALIDATION", `Podés elegir hasta ${MAX_PRIORITIES} zonas para priorizar`);
     priorities = [...new Set(priorities)];
   }
-  return { gender: genderRaw, priorities, sessionMinutes: minutesRaw === null ? null : Number(minutesRaw) };
+  // Otro deporte: clave de la lista y veces por semana (1 a 6). Sin deporte, ambos quedan vacíos.
+  const sportRaw = body.otherSport ?? fallback.other_sport ?? null;
+  if (sportRaw !== null && !SPORT_KEYS.includes(sportRaw)) throw new AppError(400, "VALIDATION", `otherSport debe ser uno de: ${SPORT_KEYS.join(", ")}`);
+  const sportDays = sportRaw === null ? null : int(body.otherSportDays ?? fallback.other_sport_days ?? 1, "otherSportDays", 1, 6);
+  return { gender: genderRaw, priorities, sessionMinutes: minutesRaw === null ? null : Number(minutesRaw), otherSport: sportRaw, otherSportDays: sportDays };
 }
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -184,9 +189,9 @@ function createApp({
 
     const { rows } = await db.query(
       `UPDATE members SET level = $1, days_per_week = $2, focus = $3, notes = $4, onboarded_at = now(),
-              gender = $6, priorities = $7::jsonb, session_minutes = $8
+              gender = $6, priorities = $7::jsonb, session_minutes = $8, other_sport = $9, other_sport_days = $10
        WHERE id = $5 RETURNING *`,
-      [level, days, focus, notes || null, req.member.id, prof.gender, prof.priorities === null ? null : JSON.stringify(prof.priorities), prof.sessionMinutes]
+      [level, days, focus, notes || null, req.member.id, prof.gender, prof.priorities === null ? null : JSON.stringify(prof.priorities), prof.sessionMinutes, prof.otherSport, prof.otherSportDays]
     );
     const member = { ...rows[0], sede_nombre: req.member.sede_nombre };
     // Si en las notas menciona una molestia, la rutina ya nace sin esos ejercicios

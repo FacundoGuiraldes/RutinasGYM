@@ -325,14 +325,14 @@ function pickForSlot(pool, slot, ctx0) {
 // Techo duro: por encima de ~31 series fraccionales por semana no se detecta ventaja alguna (Pelland 2024). El resto del rango objetivo
 // es una guía: recortar series de más acortaría el día por debajo del tiempo que pidió el socio.
 const HARD_CAP = 30;
-function balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek }) {
+function balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek, sport = null, sportDays = 0 }) {
   const priorityRegions = new Set(priorities.flatMap((z) => ZONE_REGIONS[z] ?? []));
   const exInfo = (x) => poolById.get(x.exerciseId);
   const touches = (x, region) => { const e = exInfo(x); return e && e.role !== "cardio" ? (contributions(e)[region] ?? 0) : 0; };
   const maxSets = (x) => (exInfo(x).role === "compound" ? 5 : 4);
   const minSets = (x) => (exInfo(x).role === "compound" ? 3 : 2);
   for (const region of REGIONS) {
-    const { min, max } = rangeFor(focus, region, { priority: priorityRegions.has(region), daysPerWeek });
+    const { min, max } = rangeFor(focus, region, { priority: priorityRegions.has(region), daysPerWeek, sport, sportDays });
     for (let guard = 0; guard < 60; guard++) {
       const v = weeklyVolume(days, poolById)[region];
       if (v > Math.max(max, HARD_CAP)) {
@@ -468,15 +468,15 @@ function generateOnce({ pool, member, cycleNumber = 1, prog = {}, prevIds = new 
       for (let k = 0; k > p.extraPerDay && exercises.length > 3; k--) { const last = exercises.pop(); dayUsed.delete(last.exerciseId); dayUsed.delete(poolById.get(last.exerciseId)?.name); }
     }
     // Bajar grasa: cierre con cardio
-    if (focus === "bajar_grasa") fill("cardio");
+    if (focus === "bajar_grasa" && !((member.otherSportDays ?? 0) >= 2)) fill("cardio"); // con otro deporte 2 o más veces por semana, el cardio ya está cubierto
 
     return { dayIndex: i + 1, label: `Día ${i + 1} – ${tpl.name}`, exercises, estMinutes: estimateMinutes(exercises) };
   });
 
-  balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek: member.daysPerWeek });
+  balanceWeeklyVolume({ days, poolById, focus, priorities, sessionMinutes, daysPerWeek: member.daysPerWeek, sport: member.otherSport ?? null, sportDays: member.otherSportDays ?? 0 });
   days.forEach((d) => { d.estMinutes = estimateMinutes(d.exercises); });
 
-  const params = { level: member.level, daysPerWeek: member.daysPerWeek, focus, effLevel, cycleNumber, prog: p, sessionMinutes, priorities, prioritiesSource, gender: member.gender ?? null };
+  const params = { level: member.level, daysPerWeek: member.daysPerWeek, focus, effLevel, cycleNumber, prog: p, sessionMinutes, priorities, prioritiesSource, gender: member.gender ?? null, otherSport: member.otherSport ?? null, otherSportDays: member.otherSportDays ?? 0 };
 
   // ---------- Reparación guiada por el evaluador ----------
   // Si la rutina tiene fallas bloqueantes (ver quality.js), se prueban movimientos chicos (una serie más o menos, sacar un

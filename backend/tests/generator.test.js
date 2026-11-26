@@ -460,3 +460,22 @@ test("duraciones por rango: 45-60, 60-75 y 75-90; cada día queda dentro del ran
   }
   await db.close();
 });
+
+test("otro deporte: baja el volumen de lo que ya castiga y saca el cardio cuando ya se mueve", { skip }, async () => {
+  const db = await createSeededDb();
+  const pool = await loadPool(db, 1);
+  const by = new Map(pool.map((e) => [e.id, e]));
+  const { weeklyVolume } = require("../src/volume");
+  const base = { id: 5, level: 2, daysPerWeek: 4, focus: "hipertrofia", priorities: [], sessionMinutes: 60, gender: "hombre" };
+  const solo = generateRoutine({ pool, member: base, cycleNumber: 1 });
+  const fut = generateRoutine({ pool, member: { ...base, otherSport: "futbol", otherSportDays: 3 }, cycleNumber: 1 });
+  const v0 = weeklyVolume(solo.days, by), v1 = weeklyVolume(fut.days, by);
+  assert.ok(v1.cuadriceps + v1.isquios <= v0.cuadriceps + v0.isquios, "con fútbol 3 veces, las piernas no tienen más volumen");
+  assert.ok(fut.quality.ok, "sigue pasando el control de calidad");
+  // bajar grasa + deporte 2+ veces: sin cardio final
+  const bg = generateRoutine({ pool, member: { ...base, focus: "bajar_grasa", otherSport: "running", otherSportDays: 2 }, cycleNumber: 1 });
+  assert.equal(bg.days.some((d) => d.exercises.some((x) => by.get(x.exerciseId).role === "cardio")), false);
+  const bg0 = generateRoutine({ pool, member: { ...base, focus: "bajar_grasa" }, cycleNumber: 1 });
+  assert.equal(bg0.days.some((d) => d.exercises.some((x) => by.get(x.exerciseId).role === "cardio")), true);
+  await db.close();
+});
